@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+
+{% block title %}Origin Map{% endblock %}
+
+{% block extra_head %}
+<link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+>
+<style>
+    :root {
+        --pulse-color: rgba(126, 200, 255, 0.92);
+    }
+
+    .map-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+        gap: 16px;
+        align-items: start;
+    }
+
+    #originMap {
+        min-height: 68vh;
+        border-radius: 18px;
+        overflow: hidden;
+    }
+
+    .feed {
+        display: grid;
+        gap: 12px;
+        max-height: 68vh;
+        overflow: auto;
+        padding: 8px;
+    }
+
+    .feed-card {
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background:
+            linear-gradient(135deg, rgba(78, 179, 255, 0.08), transparent 42%),
+            var(--panel-soft);
+    }
+
+    .feed-card strong {
+        color: var(--text);
+    }
+
+    .feed-card p {
+        margin: 8px 0 0;
+        color: var(--muted);
+        line-height: 1.45;
+    }
+
+    .country-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: rgba(78, 179, 255, 0.06);
+        color: var(--muted);
+        font-size: 0.88rem;
+    }
+
+    .legend-swatch {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+    }
+
+    .leaflet-interactive.ip-marker-pulse {
+        animation: markerPulse 0.9s ease-in-out 3;
+    }
+
+    @keyframes markerPulse {
+        0% {
+            stroke-width: 1.5;
+            fill-opacity: 0.75;
+        }
+        35% {
+            stroke-width: 7;
+            stroke: var(--pulse-color);
+            fill-opacity: 1;
+        }
+        100% {
+            stroke-width: 1.5;
+            fill-opacity: 0.75;
+        }
+    }
+
+    @media (max-width: 1100px) {
+        .map-shell {
+            grid-template-columns: 1fr;
+        }
+
+        #originMap,
+        .feed {
+            min-height: 48vh;
+            max-height: 48vh;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <h1 class="title">Live Origin Map</h1>
+        <p class="subtitle">
+            Today&apos;s source IPs plotted on a live world map. Geolocation data is cached and stored with each incoming entry in <strong>{{ current_log_file }}</strong>.
+        </p>
+    </div>
+    <div class="status">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">Connecting</span>
+    </div>
+</section>
+
+<section class="toolbar">
+    <div class="metrics">
+        <div class="metric">Mapped IPs: <strong id="mappedCount">0</strong></div>
+        <div class="metric">Unique origins: <strong id="uniqueCount">0</strong></div>
+        <div class="metric">Last update: <strong id="lastUpdate">Waiting</strong></div>
+    </div>
+    <div class="controls">
+        <button id="fitMap" type="button">Fit markers</button>
+    </div>
+</section>
+
+<section id="countryLegend" class="country-legend"></section>
+
+<section class="map-shell">
+    <div id="originMap" class="panel"></div>
+    <section id="originFeed" class="map-feed panel empty">Waiting for mapped entries...</section>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+    var socket = window._globalSocket || io();
+    const INITIAL_ENTRIES = {{ initial_entries | tojson }};
+    const MAX_FEED_ITEMS = 120;
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const mappedCount = document.getElementById("mappedCount");
+    const uniqueCount = document.getElementById("uniqueCount");
+    const lastUpdate = document.getElementById("lastUpdate");
+    const originFeed = document.getElementById("originFeed");
+    const fitMap = document.getElementById("fitMap");
+    const countryLegend = document.getElementById("countryLegend");
+    const SOURCE_ID = {{ current_source_id | tojson }};
+
+    const map = L.map("originMap", {
+        worldCopyJump: true,
+        minZoom: 2
+    }).setView([20, 0], 2);
+
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        maxZoom: 18,
+        attribution: "&copy; OpenStreetMap contributors &copy; CARTO"
+    }).addTo(map);
+
+    const markersByIp = new Map();
+    const colorsByCountry = new Map();
+    let feedEntries = [];
+    let mappedEvents = 0;
+    const COUNTRY_COLORS = [
+        "#4eb3ff",
+        "#59d2a6",
+        "#7ec8ff",
+        "#f0b45d",
+        "#9a8cff",
+        "#ff7a8b",
+        "#61d9ff",
+        "#7cd3b5",
+        "#c4a6ff",
+        "#ffb86d",
+        "#5da4ff",
+        "#86e5c1"
+    ];
+
+    function setStatus(isLive, label) {
+        statusText.textContent = label;
+        statusDot.classList.toggle("live", isLive);
+    }
+
+    function getCountryColor(country) {
+        const key = country || "Unknown";
+        if (!colorsByCountry.has(key)) {
+            const color = COUNTRY_COLORS[colorsByCountry.size % COUNTRY_COLORS.length];
+            colorsByCountry.set(key, color);
+            renderLegend();
+        }
+        return colorsByCountry.get(key);
+    }
+
+    function renderLegend() {
+        countryLegend.innerHTML = "";
+        Array.from(colorsByCountry.entries())
+            .sort(function(a, b) {
+                return a[0].localeCompare(b[0]);
+            })
+            .forEach(function(entry) {
+                const item = document.createElement("div");
+                item.className = "legend-item";
+
+                const swatch = document.createElement("span");
+                swatch.className = "legend-swatch";
+                swatch.style.backgroundColor = entry[1];
+
+                const label = document.createElement("span");
+                label.textContent = entry[0];
+
+                item.appendChild(swatch);
+                item.appendChild(label);
+                countryLegend.appendChild(item);
+            });
+    }
+
+    function buildPopupText(entry, stats) {
+        /* Returns an array of safe strings to be set via textContent */
+        var geo    = entry.geo || {};
+        var parsed = entry.parsed || {};
+        var lines  = [
+            geo.ip       || "Unknown IP",
+            (geo.city && geo.country) ? (geo.city + ", " + geo.country) : (geo.country || "Unknown location"),
+            parsed.path  ? "Path: " + parsed.path : null,
+            "Hits today: " + stats.count
+        ];
+        return lines.filter(Boolean).join("\n");
+    }
+
+    function pulseMarker(marker) {
+        const element = marker.getElement();
+        if (!element) {
+            return;
+        }
+
+        element.classList.remove("ip-marker-pulse");
+        void element.getBoundingClientRect();
+        element.classList.add("ip-marker-pulse");
+
+        window.setTimeout(function() {
+            element.classList.remove("ip-marker-pulse");
+        }, 2800);
+    }
+
+    function renderFeed() {
+        originFeed.innerHTML = "";
+
+        if (feedEntries.length === 0) {
+            originFeed.textContent = "Waiting for mapped entries...";
+            originFeed.classList.add("empty");
+            return;
+        }
+
+        originFeed.classList.remove("empty");
+
+        feedEntries.forEach(function(entry) {
+            const card = document.createElement("article");
+            card.className = "feed-card";
+
+            const title = document.createElement("strong");
+            title.textContent = entry.geo.ip + " • " + (entry.geo.city || entry.geo.country || "Unknown");
+
+            const text = document.createElement("p");
+            text.textContent = [
+                entry.geo.country || "-",
+                entry.parsed && entry.parsed.timestamp ? entry.parsed.timestamp : null,
+                entry.parsed && entry.parsed.path ? entry.parsed.path : null
+            ].filter(Boolean).join(" | ");
+
+            card.appendChild(title);
+            card.appendChild(text);
+            originFeed.appendChild(card);
+        });
+    }
+
+    function updateCounters() {
+        mappedCount.textContent = String(mappedEvents);
+        uniqueCount.textContent = String(markersByIp.size);
+    }
+
+    function fitMarkers() {
+        if (markersByIp.size === 0) {
+            map.setView([20, 0], 2);
+            return;
+        }
+
+        const bounds = L.latLngBounds(
+            Array.from(markersByIp.values()).map(function(item) {
+                return item.marker.getLatLng();
+            })
+        );
+        map.fitBounds(bounds.pad(0.25));
+    }
+
+    function addEntry(entry, shouldRefit) {
+        if (!entry.geo || entry.geo.latitude === undefined || entry.geo.longitude === undefined) {
+            return;
+        }
+
+        const key = entry.geo.ip;
+        const existing = markersByIp.get(key);
+        const markerColor = getCountryColor(entry.geo.country);
+
+        if (existing) {
+            existing.count += 1;
+            existing.lastEntry = entry;
+            existing.marker.setStyle({
+                color: markerColor,
+                fillColor: markerColor
+            });
+            existing.marker.setPopupContent(buildPopupText(entry, existing));
+            pulseMarker(existing.marker);
+        } else {
+            const marker = L.circleMarker([entry.geo.latitude, entry.geo.longitude], {
+                radius: 7,
+                color: markerColor,
+                weight: 1.5,
+                fillColor: markerColor,
+                fillOpacity: 0.75
+            }).addTo(map);
+
+            const markerState = {
+                marker: marker,
+                count: 1,
+                lastEntry: entry
+            };
+
+            marker.bindPopup(buildPopupText(entry, markerState));
+            markersByIp.set(key, markerState);
+        }
+
+        mappedEvents += 1;
+        feedEntries.unshift(entry);
+        if (feedEntries.length > MAX_FEED_ITEMS) {
+            feedEntries = feedEntries.slice(0, MAX_FEED_ITEMS);
+        }
+
+        updateCounters();
+        renderFeed();
+
+        if (entry.received_at) {
+            lastUpdate.textContent = new Date(entry.received_at).toLocaleTimeString();
+        }
+
+        if (shouldRefit) {
+            fitMarkers();
+        }
+    }
+
+    socket.on("connect", function() {
+        setStatus(true, "Connected");
+    });
+
+    socket.on("disconnect", function() {
+        setStatus(false, "Disconnected");
+    });
+
+    socket.on("log", function(msg) {
+        if (msg.source_id !== SOURCE_ID) {
+            return;
+        }
+        addEntry(msg, false);
+    });
+
+    fitMap.addEventListener("click", function() {
+        fitMarkers();
+    });
+
+    INITIAL_ENTRIES.forEach(function(entry) {
+        addEntry(entry, false);
+    });
+    renderLegend();
+    fitMarkers();
+</script>
+{% endblock %}

@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+{% block title %}Security{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-header-left">
+        <h1 class="title">Security</h1>
+        <p class="subtitle">Authentication activity, login failure patterns, brute-force alerts, and error streams — all in one view.</p>
+    </div>
+    <div class="page-header-right">
+        <a href="/alerts" class="alert-bell-btn">
+            ⚠ Alerts <span class="alert-bell-count" id="headerAlertCount">{{ auth_alerts | length }}</span>
+        </a>
+    </div>
+</div>
+
+<!-- Tab bar -->
+<div class="tab-bar">
+    <button class="tab-btn active" data-tab="auth"   type="button">🔑 Auth Log</button>
+    <button class="tab-btn"         data-tab="errors" type="button">⚡ Error Streams</button>
+</div>
+
+<!-- ══ AUTH TAB ══════════════════════════════════════════════ -->
+<div id="tab-auth" class="tab-panel active">
+    <div class="toolbar">
+        <div class="metrics">
+            <div class="metric">Auth Events: <strong id="authEventCount">{{ auth_entries | length }}</strong></div>
+            <div class="metric">Brute-force: <strong id="authAlertCount" style="color:{% if auth_alerts %}var(--danger){% else %}var(--success){% endif %};">{{ auth_alerts | length }}</strong></div>
+            <div class="metric">Last update: <strong id="authLastUpdate">—</strong></div>
+        </div>
+        <div class="controls">
+            <input class="search-input" id="authSearch" type="text" placeholder="Search IP, user…">
+            <button type="button" class="filter-button filter-accent active" data-filter="all">All</button>
+            <button type="button" class="filter-button filter-accent" data-filter="failed">Failed</button>
+            <button type="button" class="filter-button filter-accent" data-filter="accepted">Accepted</button>
+            <button type="button" class="filter-button filter-accent" data-filter="invalid_user">Invalid</button>
+        </div>
+    </div>
+
+    {% if auth_alerts %}
+    <div style="margin-bottom:12px;padding:10px 14px;border:1px solid rgba(248,113,113,0.28);border-radius:var(--radius-sm);background:rgba(248,113,113,0.07);">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            <span class="badge badge-danger">Brute Force</span>
+            <span style="color:var(--danger);font-size:0.86rem;font-weight:500;">{{ auth_alerts | length }} pattern{{ 's' if auth_alerts | length != 1 else '' }} detected</span>
+        </div>
+        {% for alert in auth_alerts[:3] %}
+        <div style="font-size:0.80rem;color:var(--muted);">— {{ alert.title }} {% if alert.ip %}from {{ alert.ip }}{% endif %}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <section class="table-shell panel">
+        <table>
+            <thead><tr><th>Time</th><th>Action</th><th>Result</th><th>User</th><th>IP</th><th>Message</th></tr></thead>
+            <tbody id="authBody">
+                {% for entry in auth_entries %}
+                <tr class="auth-row"
+                    data-result="{{ entry.parsed.result or '' }}"
+                    data-text="{{ (entry.parsed.ip or '') ~ ' ' ~ (entry.parsed.username or '') ~ ' ' ~ (entry.parsed.message or entry.raw) }}">
+                    <td style="white-space:nowrap;font-size:0.78rem;color:var(--muted);">{{ entry.parsed.timestamp or entry.collected_at }}</td>
+                    <td>{{ entry.parsed.action or '—' }}</td>
+                    <td>
+                        {% set r = entry.parsed.result or '' %}
+                        {% if r in ['failed','invalid_user'] %}<span class="badge badge-danger">{{ r }}</span>
+                        {% elif r == 'accepted' %}<span class="badge badge-success">{{ r }}</span>
+                        {% else %}<span class="text-muted">{{ r or '—' }}</span>{% endif %}
+                    </td>
+                    <td style="font-family:'Consolas','Cascadia Code',monospace;font-size:0.80rem;">{{ entry.parsed.username or '—' }}</td>
+                    <td style="font-family:'Consolas','Cascadia Code',monospace;font-size:0.80rem;">{{ entry.parsed.ip or '—' }}</td>
+                    <td style="max-width:320px;word-break:break-word;font-size:0.80rem;">{{ entry.parsed.message or entry.raw }}</td>
+                </tr>
+                {% endfor %}
+                {% if not auth_entries %}<tr><td colspan="6" class="empty">No auth events yet.</td></tr>{% endif %}
+            </tbody>
+        </table>
+    </section>
+</div>
+
+<!-- ══ ERRORS TAB ════════════════════════════════════════════ -->
+<div id="tab-errors" class="tab-panel">
+    <div class="toolbar">
+        <div class="metrics">
+            <div class="metric">Errors shown: <strong id="errorCount">{{ error_entries | length }}</strong></div>
+            <div class="metric">Last update: <strong id="errorLastUpdate">—</strong></div>
+        </div>
+        <div class="controls">
+            <input class="search-input" id="errorSearch" type="text" placeholder="Search message…">
+            <button type="button" class="filter-button filter-accent active" data-esrc="all">All</button>
+            <button type="button" class="filter-button filter-accent" data-esrc="nginx_error">Nginx</button>
+            <button type="button" class="filter-button filter-accent" data-esrc="php_fpm_error">PHP-FPM</button>
+            <button type="button" class="filter-button filter-accent" data-esrc="syslog">Syslog</button>
+            <button type="button" class="filter-button filter-accent" data-esrc="kernel_log">Kernel</button>
+        </div>
+    </div>
+
+    <section class="table-shell panel">
+        <table>
+            <thead><tr><th>Source</th><th>Time</th><th>Level</th><th>Message</th></tr></thead>
+            <tbody id="errorBody">
+                {% for entry in error_entries %}
+                {% set lvl = entry.parsed.level or '' %}
+                <tr class="error-row" data-src="{{ entry.source_id }}" data-text="{{ (entry.parsed.message or entry.raw) }}">
+                    <td>
+                        {% if entry.source_id == 'nginx_error' %}<span class="badge badge-accent">Nginx</span>
+                        {% elif entry.source_id == 'php_fpm_error' %}<span class="badge badge-warning">PHP-FPM</span>
+                        {% elif entry.source_id == 'syslog' %}<span class="badge badge-muted">Syslog</span>
+                        {% elif entry.source_id == 'kernel_log' %}<span class="badge badge-danger">Kernel</span>
+                        {% else %}<span class="badge badge-muted">{{ entry.source_id }}</span>{% endif %}
+                    </td>
+                    <td style="white-space:nowrap;font-size:0.78rem;color:var(--muted);">{{ entry.parsed.timestamp or entry.collected_at }}</td>
+                    <td>
+                        {% if lvl in ['error','crit','alert','emerg'] %}<span class="badge badge-danger">{{ lvl }}</span>
+                        {% elif lvl in ['warn','warning'] %}<span class="badge badge-warning">{{ lvl }}</span>
+                        {% elif lvl %}<span class="badge badge-muted">{{ lvl }}</span>
+                        {% else %}<span class="text-muted">—</span>{% endif %}
+                    </td>
+                    <td style="max-width:460px;word-break:break-word;font-size:0.80rem;">{{ entry.parsed.message or entry.raw }}</td>
+                </tr>
+                {% endfor %}
+                {% if not error_entries %}<tr><td colspan="4" class="empty">No error events yet.</td></tr>{% endif %}
+            </tbody>
+        </table>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    /* ── Tab switching ── */
+    document.querySelectorAll(".tab-btn").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            document.querySelectorAll(".tab-btn").forEach(function(b){ b.classList.remove("active"); });
+            document.querySelectorAll(".tab-panel").forEach(function(p){ p.classList.remove("active"); });
+            btn.classList.add("active");
+            document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+        });
+    });
+
+    /* ══ AUTH tab logic ══ */
+    var activeAuthFilter = "all";
+    var authSearchQuery  = "";
+    var authRows = Array.from(document.querySelectorAll(".auth-row"));
+
+    function applyAuthFilters() {
+        authRows.forEach(function(row) {
+            var matchF = activeAuthFilter === "all" || row.dataset.result === activeAuthFilter;
+            var matchS = !authSearchQuery || row.dataset.text.toLowerCase().includes(authSearchQuery);
+            row.style.display = (matchF && matchS) ? "" : "none";
+        });
+    }
+
+    document.querySelectorAll(".filter-button[data-filter]").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            document.querySelectorAll(".filter-button[data-filter]").forEach(function(b){ b.classList.remove("active"); });
+            btn.classList.add("active");
+            activeAuthFilter = btn.dataset.filter;
+            applyAuthFilters();
+        });
+    });
+
+    document.getElementById("authSearch").addEventListener("input", function() {
+        authSearchQuery = this.value.toLowerCase(); applyAuthFilters();
+    });
+
+    /* ══ ERRORS tab logic ══ */
+    var activeErrSource = "all";
+    var errSearchQuery  = "";
+    var errRows = Array.from(document.querySelectorAll(".error-row"));
+
+    function applyErrFilters() {
+        errRows.forEach(function(row) {
+            var matchS = activeErrSource === "all" || row.dataset.src === activeErrSource;
+            var matchQ = !errSearchQuery || row.dataset.text.toLowerCase().includes(errSearchQuery);
+            row.style.display = (matchS && matchQ) ? "" : "none";
+        });
+    }
+
+    document.querySelectorAll(".filter-button[data-esrc]").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            document.querySelectorAll(".filter-button[data-esrc]").forEach(function(b){ b.classList.remove("active"); });
+            btn.classList.add("active");
+            activeErrSource = btn.dataset.esrc;
+            applyErrFilters();
+        });
+    });
+
+    document.getElementById("errorSearch").addEventListener("input", function() {
+        errSearchQuery = this.value.toLowerCase(); applyErrFilters();
+    });
+
+    /* ══ Live Socket updates ══ */
+    if (!window._globalSocket) return;
+
+    var ERROR_SOURCES = new Set(["nginx_error","php_fpm_error","syslog","kernel_log"]);
+    var SRC_BADGE = { nginx_error:["Nginx","badge badge-accent"], php_fpm_error:["PHP-FPM","badge badge-warning"], syslog:["Syslog","badge badge-muted"], kernel_log:["Kernel","badge badge-danger"] };
+    var CRIT_LEVELS = new Set(["error","crit","alert","emerg"]);
+    var WARN_LEVELS = new Set(["warn","warning"]);
+
+    window._globalSocket.on("log", function(msg) {
+        /* Auth live */
+        if (msg.source_id === "auth_log") {
+            var parsed = msg.parsed || {};
+            var result = parsed.result || "";
+            document.getElementById("authLastUpdate").textContent = new Date(msg.received_at).toLocaleTimeString();
+
+            var tr = document.createElement("tr");
+            tr.className = "auth-row"; tr.dataset.result = result;
+            tr.dataset.text = (parsed.ip||"")+" "+(parsed.username||"")+" "+(parsed.message||msg.raw||"");
+
+            function addTd(text, style) { var td=document.createElement("td"); td.textContent=text; if(style) td.setAttribute("style",style); return td; }
+            tr.appendChild(addTd(parsed.timestamp||msg.collected_at||"—","white-space:nowrap;font-size:0.78rem;color:var(--muted);"));
+            tr.appendChild(addTd(parsed.action||"—"));
+
+            var rtd = document.createElement("td");
+            var rb = document.createElement("span");
+            rb.className = (result==="failed"||result==="invalid_user")?"badge badge-danger":result==="accepted"?"badge badge-success":"text-muted";
+            rb.textContent = result||"—"; rtd.appendChild(rb); tr.appendChild(rtd);
+
+            tr.appendChild(addTd(parsed.username||"—","font-family:'Consolas','Cascadia Code',monospace;font-size:0.80rem;"));
+            tr.appendChild(addTd(parsed.ip||"—","font-family:'Consolas','Cascadia Code',monospace;font-size:0.80rem;"));
+            tr.appendChild(addTd(parsed.message||msg.raw||"—","max-width:320px;word-break:break-word;font-size:0.80rem;"));
+
+            var tbody = document.getElementById("authBody");
+            tbody.insertBefore(tr, tbody.firstChild);
+            authRows.unshift(tr);
+            while(authRows.length > 200) { var old=authRows.pop(); if(old.parentNode) old.parentNode.removeChild(old); }
+            document.getElementById("authEventCount").textContent = String(authRows.length);
+            applyAuthFilters();
+        }
+
+        /* Error live */
+        if (ERROR_SOURCES.has(msg.source_id)) {
+            var parsedE = msg.parsed || {};
+            var level = (parsedE.level||"").toLowerCase();
+            document.getElementById("errorLastUpdate").textContent = new Date(msg.received_at).toLocaleTimeString();
+
+            var trE = document.createElement("tr");
+            trE.className = "error-row"; trE.dataset.src = msg.source_id;
+            trE.dataset.text = parsedE.message||msg.raw||"";
+
+            var srcTd = document.createElement("td");
+            var bi = SRC_BADGE[msg.source_id]||[msg.source_id,"badge badge-muted"];
+            var sb2 = document.createElement("span"); sb2.className=bi[1]; sb2.textContent=bi[0]; srcTd.appendChild(sb2); trE.appendChild(srcTd);
+
+            var timeTd2 = document.createElement("td"); timeTd2.setAttribute("style","white-space:nowrap;font-size:0.78rem;color:var(--muted);"); timeTd2.textContent=parsedE.timestamp||msg.collected_at||"—"; trE.appendChild(timeTd2);
+
+            var lvlTd = document.createElement("td");
+            if (level) { var lb=document.createElement("span"); lb.className=CRIT_LEVELS.has(level)?"badge badge-danger":WARN_LEVELS.has(level)?"badge badge-warning":"badge badge-muted"; lb.textContent=level; lvlTd.appendChild(lb); }
+            else { lvlTd.innerHTML='<span class="text-muted">—</span>'; }
+            trE.appendChild(lvlTd);
+
+            var msgTd = document.createElement("td"); msgTd.setAttribute("style","max-width:460px;word-break:break-word;font-size:0.80rem;"); msgTd.textContent=parsedE.message||msg.raw||"—"; trE.appendChild(msgTd);
+
+            var tbodyE = document.getElementById("errorBody");
+            tbodyE.insertBefore(trE, tbodyE.firstChild);
+            errRows.unshift(trE);
+            while(errRows.length > 300) { var olde=errRows.pop(); if(olde.parentNode) olde.parentNode.removeChild(olde); }
+            document.getElementById("errorCount").textContent = String(errRows.length);
+            applyErrFilters();
+        }
+    });
+}());
+</script>
+{% endblock %}

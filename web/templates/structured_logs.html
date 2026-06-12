@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Structured View{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <h1 class="title">{{ current_source_name }} Breakdown</h1>
+        <p class="subtitle">
+            Parses access-log lines into structured fields with HTTP status colouring and method pills.
+            Today's entries are persisted in <strong>{{ current_log_file }}</strong>.
+        </p>
+    </div>
+    <div class="status">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">Connecting</span>
+    </div>
+</section>
+
+<section class="toolbar">
+    <div class="metrics">
+        <div class="metric">Entries: <strong id="entryCount">0</strong></div>
+        <div class="metric">Parsed: <strong id="parsedCount">0</strong></div>
+        <div class="metric">Unmatched: <strong id="unmatchedCount">0</strong></div>
+        <div class="metric">Last update: <strong id="lastUpdate">Waiting</strong></div>
+    </div>
+    <div class="controls">
+        <label><input id="autoScroll" type="checkbox" checked> Auto-scroll</label>
+        <button id="clearLogs" type="button">Clear entries</button>
+    </div>
+</section>
+
+<section id="logStream" class="log-stream panel empty">
+    Waiting for parsed log stream…
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    var MAX_ENTRIES   = 250;
+    var INITIAL_ENTRIES = {{ initial_entries | tojson }};
+    var SOURCE_ID     = {{ current_source_id | tojson }};
+
+    var logStream    = document.getElementById("logStream");
+    var entryCount   = document.getElementById("entryCount");
+    var parsedCount  = document.getElementById("parsedCount");
+    var unmatchedCount = document.getElementById("unmatchedCount");
+    var lastUpdate   = document.getElementById("lastUpdate");
+    var statusDot    = document.getElementById("statusDot");
+    var statusText   = document.getElementById("statusText");
+    var autoScroll   = document.getElementById("autoScroll");
+    var clearLogs    = document.getElementById("clearLogs");
+
+    var entries = INITIAL_ENTRIES.slice().reverse().map(function(e) { return e.parsed; });
+
+    function setStatus(live, label) {
+        statusText.textContent = label;
+        statusDot.classList.toggle("live", live);
+    }
+
+    function statusClass(code) {
+        var c = parseInt(code, 10);
+        if (c >= 500) { return "status-5xx"; }
+        if (c >= 400) { return "status-4xx"; }
+        if (c >= 300) { return "status-3xx"; }
+        if (c >= 200) { return "status-2xx"; }
+        return "text-muted";
+    }
+
+    function methodClass(method) {
+        var m = (method || "").toUpperCase();
+        var map = { GET:"method-GET", POST:"method-POST", PUT:"method-PUT", PATCH:"method-PATCH", DELETE:"method-DELETE" };
+        return "method-pill " + (map[m] || "method-OTHER");
+    }
+
+    function makeField(label, value) {
+        var div = document.createElement("div");
+        div.className = "log-field";
+        var lbl = document.createElement("span");
+        lbl.className = "field-label";
+        lbl.textContent = label;
+        var val = document.createElement("span");
+        val.textContent = value || "—";
+        div.appendChild(lbl);
+        div.appendChild(val);
+        return div;
+    }
+
+    function renderCard(entry) {
+        var card = document.createElement("article");
+        card.className = "log-card" + (entry.matched ? "" : " unmatched");
+
+        var top = document.createElement("div");
+        top.className = "log-top";
+
+        var req = document.createElement("div");
+        req.className = "request-line";
+        if (entry.matched) {
+            /* Method pill */
+            if (entry.method) {
+                var mpill = document.createElement("span");
+                mpill.className = methodClass(entry.method);
+                mpill.textContent = entry.method;
+                req.appendChild(mpill);
+                req.appendChild(document.createTextNode(" "));
+            }
+            var pathSpan = document.createElement("span");
+            pathSpan.textContent = [entry.path, entry.protocol].filter(Boolean).join(" ");
+            req.appendChild(pathSpan);
+        } else {
+            req.textContent = "Unmatched log format";
+        }
+
+        var pill = document.createElement("span");
+        pill.className = "pill";
+        if (entry.matched && entry.status) {
+            pill.textContent = "Status ";
+            var codeSpan = document.createElement("span");
+            codeSpan.className = statusClass(entry.status);
+            codeSpan.textContent = entry.status;
+            pill.appendChild(codeSpan);
+        } else {
+            pill.textContent = "Raw only";
+        }
+
+        top.appendChild(req);
+        top.appendChild(pill);
+        card.appendChild(top);
+
+        var fields = document.createElement("div");
+        fields.className = "log-fields";
+        fields.appendChild(makeField("IP", entry.ip));
+        fields.appendChild(makeField("Timestamp", entry.timestamp));
+        fields.appendChild(makeField("Method", entry.method));
+        fields.appendChild(makeField("Path", entry.path));
+        fields.appendChild(makeField("Bytes", entry.size));
+        fields.appendChild(makeField("User-Agent", entry.user_agent));
+        card.appendChild(fields);
+
+        var raw = document.createElement("pre");
+        raw.className = "raw-line";
+        raw.textContent = entry.raw || "";
+        card.appendChild(raw);
+
+        return card;
+    }
+
+    function updateCounters() {
+        entryCount.textContent    = String(entries.length);
+        parsedCount.textContent   = String(entries.filter(function(e){ return e.matched; }).length);
+        unmatchedCount.textContent = String(entries.filter(function(e){ return !e.matched; }).length);
+    }
+
+    function renderStream() {
+        while (logStream.firstChild) { logStream.removeChild(logStream.firstChild); }
+        if (entries.length === 0) {
+            logStream.textContent = "Waiting for parsed log stream…";
+            logStream.classList.add("empty");
+        } else {
+            logStream.classList.remove("empty");
+            entries.forEach(function(e) { logStream.appendChild(renderCard(e)); });
+        }
+        updateCounters();
+        if (autoScroll.checked) { logStream.scrollTop = 0; }
+    }
+
+    if (window._globalSocket) {
+        window._globalSocket.on("connect",    function() { setStatus(true,  "Connected"); });
+        window._globalSocket.on("disconnect", function() { setStatus(false, "Disconnected"); });
+        window._globalSocket.on("log", function(msg) {
+            if (msg.source_id !== SOURCE_ID) { return; }
+            entries.unshift(msg.parsed);
+            if (entries.length > MAX_ENTRIES) { entries = entries.slice(0, MAX_ENTRIES); }
+            lastUpdate.textContent = new Date(msg.received_at).toLocaleTimeString();
+            renderStream();
+        });
+        setStatus(true, "Connected");
+    }
+
+    clearLogs.addEventListener("click", function() {
+        entries = [];
+        lastUpdate.textContent = "Cleared";
+        renderStream();
+    });
+
+    if (INITIAL_ENTRIES.length > 0) {
+        lastUpdate.textContent = new Date(INITIAL_ENTRIES[INITIAL_ENTRIES.length - 1].received_at).toLocaleTimeString();
+    }
+
+    renderStream();
+}());
+</script>
+{% endblock %}

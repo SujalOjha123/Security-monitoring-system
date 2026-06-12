@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Raw Stream{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <h1 class="title">{{ current_source_name }}</h1>
+        <p class="subtitle">
+            Raw remote log stream. No parsing applied in this view.
+            Today's entries are persisted in <strong>{{ current_log_file }}</strong>.
+        </p>
+    </div>
+    <div class="status">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">Connecting</span>
+    </div>
+</section>
+
+<section class="toolbar">
+    <div class="metrics">
+        <div class="metric">Lines: <strong id="lineCount">0</strong></div>
+        <div class="metric">Last update: <strong id="lastUpdate">Waiting</strong></div>
+    </div>
+    <div class="controls">
+        <label><input id="autoScroll" type="checkbox" checked> Auto-scroll</label>
+        <button id="clearLogs" type="button">Clear console</button>
+    </div>
+</section>
+
+<div id="logs" class="panel empty">Waiting for log stream…</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    var MAX_LINES     = 500;
+    var MAX_DOM_NODES = 500;
+    var INITIAL_ENTRIES = {{ initial_entries | tojson }};
+    var SOURCE_ID     = {{ current_source_id | tojson }};
+
+    var logsEl    = document.getElementById("logs");
+    var lineCount = document.getElementById("lineCount");
+    var lastUpdate = document.getElementById("lastUpdate");
+    var statusDot = document.getElementById("statusDot");
+    var statusText = document.getElementById("statusText");
+    var autoScroll = document.getElementById("autoScroll");
+    var clearLogs  = document.getElementById("clearLogs");
+
+    /* Use a <p> per line for append-only — no full DOM rebuild */
+    var lineBuffer = [];
+
+    function setStatus(live, label) {
+        statusText.textContent = label;
+        statusDot.classList.toggle("live", live);
+    }
+
+    function appendLine(text) {
+        var p = document.createElement("p");
+        p.style.margin = "0";
+        p.style.padding = "1px 0";
+        p.textContent = text;
+        logsEl.appendChild(p);
+        lineBuffer.push(p);
+
+        /* Prune oldest nodes when limit exceeded */
+        while (lineBuffer.length > MAX_DOM_NODES) {
+            var old = lineBuffer.shift();
+            if (old.parentNode) { old.parentNode.removeChild(old); }
+        }
+    }
+
+    function clearAll() {
+        while (logsEl.firstChild) { logsEl.removeChild(logsEl.firstChild); }
+        lineBuffer = [];
+        logsEl.classList.add("empty");
+        logsEl.textContent = "Waiting for log stream…";
+    }
+
+    function ensureNotEmpty() {
+        if (logsEl.classList.contains("empty")) {
+            while (logsEl.firstChild) { logsEl.removeChild(logsEl.firstChild); }
+            logsEl.classList.remove("empty");
+        }
+    }
+
+    function refreshCounter() {
+        lineCount.textContent = String(lineBuffer.length);
+        if (autoScroll.checked) { logsEl.scrollTop = logsEl.scrollHeight; }
+    }
+
+    /* Seed with initial entries (most recent last = bottom of console) */
+    if (INITIAL_ENTRIES.length > 0) {
+        ensureNotEmpty();
+        var seed = INITIAL_ENTRIES.slice(-MAX_LINES);
+        seed.forEach(function(entry) { appendLine(entry.raw); });
+        lastUpdate.textContent = new Date(INITIAL_ENTRIES[INITIAL_ENTRIES.length - 1].received_at).toLocaleTimeString();
+        refreshCounter();
+        logsEl.scrollTop = logsEl.scrollHeight;
+    }
+
+    if (window._globalSocket) {
+        window._globalSocket.on("connect",    function() { setStatus(true,  "Connected"); });
+        window._globalSocket.on("disconnect", function() { setStatus(false, "Disconnected"); });
+        window._globalSocket.on("log", function(msg) {
+            if (msg.source_id !== SOURCE_ID) { return; }
+            ensureNotEmpty();
+            appendLine(msg.raw);
+            lastUpdate.textContent = new Date(msg.received_at).toLocaleTimeString();
+            refreshCounter();
+        });
+        setStatus(true, "Connected");
+    }
+
+    clearLogs.addEventListener("click", function() {
+        clearAll();
+        lineCount.textContent = "0";
+        lastUpdate.textContent = "Cleared";
+    });
+}());
+</script>
+{% endblock %}

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="VAPT Defender — live SSH log collection, remote host telemetry, and attack detection dashboard.">
+    <title>{% block title %}VAPT Defender{% endblock %} — VAPT Defender</title>
+
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path fill='%23a78bfa' d='M16 2L4 7v9c0 7 5.5 13.3 12 15 6.5-1.7 12-8 12-15V7L16 2z'/><path fill='%2308060f' d='M16 8l-2 6H9l5 3.5-2 6L16 20l4 3.5-2-6 5-3.5h-5z'/></svg>">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+
+    <!-- Chart.js — loaded once -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
+
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+<!-- Mobile hamburger -->
+<button class="hamburger" id="hamburgerBtn" aria-label="Toggle navigation" type="button">
+    <span></span><span></span><span></span>
+</button>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+<div class="layout">
+    <!-- ── Sidebar — always vertical, never horizontal ── -->
+    <aside class="sidebar" id="sidebar">
+        <div class="brand">
+            <span class="brand-tag">SOC · Live</span>
+            <h1>VAPT Defender</h1>
+        </div>
+
+        <nav class="nav" aria-label="Dashboard navigation">
+            <a id="nav-overview" class="nav-link {% if active_page == 'overview' %}active{% endif %}" href="/overview">
+                <span class="nav-icon">⬡</span> Overview
+            </a>
+            <a id="nav-traffic" class="nav-link {% if active_page == 'traffic' %}active{% endif %}" href="/traffic">
+                <span class="nav-icon">◈</span> Web Traffic
+            </a>
+            <a id="nav-health" class="nav-link {% if active_page == 'health' %}active{% endif %}" href="/health">
+                <span class="nav-icon">◎</span> Host Health
+            </a>
+            <a id="nav-security" class="nav-link {% if active_page == 'security' %}active{% endif %}" href="/security">
+                <span class="nav-icon">⬟</span> Security
+            </a>
+            <a id="nav-history" class="nav-link {% if active_page == 'history' %}active{% endif %}" href="/history">
+                <span class="nav-icon">◷</span> History
+            </a>
+            <a id="nav-stats" class="nav-link {% if active_page == 'stats' %}active{% endif %}" href="/stats">
+                <span class="nav-icon">◈</span> Statistics
+            </a>
+
+            <div class="nav-section-label" style="margin-top:8px;">Alerts</div>
+            <a id="nav-alerts" class="nav-link {% if active_page == 'alerts' %}active{% endif %}" href="/alerts">
+                <span class="nav-icon">⚠</span> Alert Queue
+                <span class="nav-alert-badge" id="sidebarAlertCount" style="display:none;">0</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-note">
+            Read-only SSH · Data stored locally
+        </div>
+    </aside>
+
+    <main class="content">
+        <section class="shell">
+            {% block content %}{% endblock %}
+        </section>
+    </main>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container" role="region" aria-live="polite"></div>
+
+<!-- Socket.IO — loaded once -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
+<script>
+(function () {
+    "use strict";
+
+    /* ── Mobile sidebar ── */
+    var hamburger = document.getElementById("hamburgerBtn");
+    var overlay   = document.getElementById("sidebarOverlay");
+    var sidebar   = document.getElementById("sidebar");
+
+    function openSidebar()  { sidebar.classList.add("open");    overlay.classList.add("open");    hamburger.setAttribute("aria-expanded","true"); }
+    function closeSidebar() { sidebar.classList.remove("open"); overlay.classList.remove("open"); hamburger.setAttribute("aria-expanded","false"); }
+
+    hamburger.addEventListener("click", function () {
+        sidebar.classList.contains("open") ? closeSidebar() : openSidebar();
+    });
+    overlay.addEventListener("click", closeSidebar);
+
+    /* ── Toast system ── */
+    var toastContainer = document.getElementById("toast-container");
+
+    window.showToast = function (title, desc, severity) {
+        severity = severity || "medium";
+        var toast = document.createElement("div");
+        toast.className = "toast toast-" + severity;
+        toast.setAttribute("role", "alert");
+
+        var dot = document.createElement("div");
+        dot.className = "toast-dot";
+
+        var body = document.createElement("div");
+        body.className = "toast-body";
+
+        var titleEl = document.createElement("div");
+        titleEl.className = "toast-title";
+        titleEl.textContent = title;
+
+        var descEl = document.createElement("div");
+        descEl.className = "toast-desc";
+        descEl.textContent = desc || "";
+
+        body.appendChild(titleEl);
+        body.appendChild(descEl);
+
+        var closeBtn = document.createElement("button");
+        closeBtn.className = "toast-close";
+        closeBtn.setAttribute("aria-label", "Dismiss");
+        closeBtn.textContent = "×";
+
+        toast.appendChild(dot);
+        toast.appendChild(body);
+        toast.appendChild(closeBtn);
+        toastContainer.appendChild(toast);
+
+        var timer = setTimeout(function () { dismiss(toast); }, 7000);
+        closeBtn.addEventListener("click", function () { clearTimeout(timer); dismiss(toast); });
+    };
+
+    function dismiss(toast) {
+        toast.classList.add("toast-out");
+        setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 250);
+    }
+
+    /* ── Alert badge counter ── */
+    var sidebarBadge = document.getElementById("sidebarAlertCount");
+    var headerBell   = document.getElementById("headerAlertCount");   /* may not exist on all pages */
+    var newAlertCount = 0;
+
+    function updateAlertBadge(n) {
+        if (sidebarBadge) {
+            sidebarBadge.textContent = n > 99 ? "99+" : String(n);
+            sidebarBadge.style.display = n > 0 ? "" : "none";
+        }
+        if (headerBell) {
+            headerBell.textContent = n > 99 ? "99+" : String(n);
+        }
+    }
+
+    /* ── Global Socket.IO ── */
+    if (typeof io !== "undefined") {
+        var globalSocket = io({ transports: ["websocket", "polling"] });
+
+        globalSocket.on("log", function (msg) {
+            var alerts = msg.alerts;
+            if (!alerts || alerts.length === 0) { return; }
+
+            newAlertCount += alerts.length;
+            updateAlertBadge(newAlertCount);
+
+            alerts.forEach(function (alert) {
+                var sev = alert.severity || "medium";
+                if (sev === "critical" || sev === "high") {
+                    var ip = alert.ip ? " — " + alert.ip : "";
+                    showToast(alert.title || "Alert", (alert.description || "").substring(0,80) + ip, sev);
+                }
+            });
+        });
+
+        window._globalSocket = globalSocket;
+    }
+
+    /* Expose badge updater so pages (e.g. alerts) can reset it */
+    window._resetAlertBadge = function () { newAlertCount = 0; updateAlertBadge(0); };
+}());
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

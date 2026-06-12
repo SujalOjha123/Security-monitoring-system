@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Errors{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <h1 class="title">Error Streams</h1>
+        <p class="subtitle">Recent Nginx, PHP-FPM, syslog, and kernel events collected into the local history store.</p>
+    </div>
+</section>
+
+<section class="toolbar">
+    <div class="metrics">
+        <div class="metric">Errors shown: <strong id="errorCount">{{ error_entries | length }}</strong></div>
+        <div class="metric">Last update: <strong id="errorLastUpdate">—</strong></div>
+    </div>
+    <div class="controls">
+        <input class="search-input" id="errorSearch" type="text" placeholder="Search message…">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="filter-button active" data-esrc="all">All</button>
+            <button type="button" class="filter-button" data-esrc="nginx_error">Nginx</button>
+            <button type="button" class="filter-button" data-esrc="php_fpm_error">PHP-FPM</button>
+            <button type="button" class="filter-button" data-esrc="syslog">Syslog</button>
+            <button type="button" class="filter-button" data-esrc="kernel_log">Kernel</button>
+        </div>
+    </div>
+</section>
+
+<section class="table-shell panel">
+    <table>
+        <thead>
+            <tr>
+                <th>Source</th>
+                <th>Time</th>
+                <th>Level</th>
+                <th>Message</th>
+            </tr>
+        </thead>
+        <tbody id="errorBody">
+            {% for entry in error_entries %}
+            {% set lvl = entry.parsed.level or '' %}
+            <tr class="error-row"
+                data-src="{{ entry.source_id }}"
+                data-text="{{ (entry.parsed.message or entry.raw) }}">
+                <td>
+                    {% if entry.source_id == 'nginx_error' %}
+                        <span class="badge badge-accent">Nginx</span>
+                    {% elif entry.source_id == 'php_fpm_error' %}
+                        <span class="badge badge-warning">PHP-FPM</span>
+                    {% elif entry.source_id == 'syslog' %}
+                        <span class="badge badge-muted">Syslog</span>
+                    {% elif entry.source_id == 'kernel_log' %}
+                        <span class="badge badge-danger">Kernel</span>
+                    {% else %}
+                        <span class="badge badge-muted">{{ entry.source_id }}</span>
+                    {% endif %}
+                </td>
+                <td style="white-space:nowrap;font-size:0.80rem;color:var(--muted);">{{ entry.parsed.timestamp or entry.collected_at }}</td>
+                <td>
+                    {% if lvl in ['error', 'crit', 'alert', 'emerg'] %}
+                        <span class="badge badge-danger">{{ lvl }}</span>
+                    {% elif lvl in ['warn', 'warning'] %}
+                        <span class="badge badge-warning">{{ lvl }}</span>
+                    {% elif lvl %}
+                        <span class="badge badge-muted">{{ lvl }}</span>
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td style="max-width:480px;word-break:break-word;font-size:0.82rem;">{{ entry.parsed.message or entry.raw }}</td>
+            </tr>
+            {% endfor %}
+            {% if not error_entries %}
+            <tr><td colspan="4" class="empty">No error events yet.</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    var activeSource = "all";
+    var searchQuery  = "";
+    var allRows = Array.from(document.querySelectorAll(".error-row"));
+
+    function applyFilters() {
+        allRows.forEach(function(row) {
+            var matchSrc    = activeSource === "all" || row.dataset.src === activeSource;
+            var matchSearch = !searchQuery || row.dataset.text.toLowerCase().includes(searchQuery);
+            row.style.display = (matchSrc && matchSearch) ? "" : "none";
+        });
+    }
+
+    document.querySelectorAll(".filter-button[data-esrc]").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            document.querySelectorAll(".filter-button[data-esrc]").forEach(function(b){ b.classList.remove("active"); });
+            btn.classList.add("active");
+            activeSource = btn.dataset.esrc;
+            applyFilters();
+        });
+    });
+
+    document.getElementById("errorSearch").addEventListener("input", function() {
+        searchQuery = this.value.toLowerCase();
+        applyFilters();
+    });
+
+    var ERROR_SOURCES = new Set(["nginx_error", "php_fpm_error", "syslog", "kernel_log"]);
+    var SOURCE_BADGE = {
+        nginx_error:  ["Nginx",   "badge badge-accent"],
+        php_fpm_error:["PHP-FPM", "badge badge-warning"],
+        syslog:       ["Syslog",  "badge badge-muted"],
+        kernel_log:   ["Kernel",  "badge badge-danger"]
+    };
+    var CRIT_LEVELS = new Set(["error","crit","alert","emerg"]);
+    var WARN_LEVELS = new Set(["warn","warning"]);
+
+    if (!window._globalSocket) { return; }
+
+    window._globalSocket.on("log", function(msg) {
+        if (!ERROR_SOURCES.has(msg.source_id)) { return; }
+        var parsed = msg.parsed || {};
+        var level  = (parsed.level || "").toLowerCase();
+
+        document.getElementById("errorLastUpdate").textContent = new Date(msg.received_at).toLocaleTimeString();
+
+        var tr = document.createElement("tr");
+        tr.className = "error-row";
+        tr.dataset.src  = msg.source_id;
+        tr.dataset.text = parsed.message || msg.raw || "";
+
+        /* Source cell */
+        var srcTd = document.createElement("td");
+        var badgeInfo = SOURCE_BADGE[msg.source_id] || [msg.source_id, "badge badge-muted"];
+        var srcBadge = document.createElement("span");
+        srcBadge.className = badgeInfo[1];
+        srcBadge.textContent = badgeInfo[0];
+        srcTd.appendChild(srcBadge);
+        tr.appendChild(srcTd);
+
+        /* Time cell */
+        var timeTd = document.createElement("td");
+        timeTd.setAttribute("style", "white-space:nowrap;font-size:0.80rem;color:var(--muted);");
+        timeTd.textContent = parsed.timestamp || msg.collected_at || "—";
+        tr.appendChild(timeTd);
+
+        /* Level cell */
+        var lvlTd = document.createElement("td");
+        if (level) {
+            var lvlBadge = document.createElement("span");
+            lvlBadge.className = CRIT_LEVELS.has(level) ? "badge badge-danger" : WARN_LEVELS.has(level) ? "badge badge-warning" : "badge badge-muted";
+            lvlBadge.textContent = level;
+            lvlTd.appendChild(lvlBadge);
+        } else {
+            lvlTd.innerHTML = '<span class="text-muted">—</span>';
+        }
+        tr.appendChild(lvlTd);
+
+        /* Message cell */
+        var msgTd = document.createElement("td");
+        msgTd.setAttribute("style", "max-width:480px;word-break:break-word;font-size:0.82rem;");
+        msgTd.textContent = parsed.message || msg.raw || "—";
+        tr.appendChild(msgTd);
+
+        var tbody = document.getElementById("errorBody");
+        tbody.insertBefore(tr, tbody.firstChild);
+        allRows.unshift(tr);
+        while (allRows.length > 300) {
+            var old = allRows.pop();
+            if (old.parentNode) { old.parentNode.removeChild(old); }
+        }
+        document.getElementById("errorCount").textContent = String(allRows.length);
+        applyFilters();
+    });
+}());
+</script>
+{% endblock %}

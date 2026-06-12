@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+{% block title %}Host Health{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-header-left">
+        <h1 class="title">Host Health</h1>
+        <p class="subtitle">Disk usage, service state, and resource telemetry — live snapshots from the remote host.</p>
+    </div>
+    <div class="page-header-right">
+        <a href="/alerts" class="alert-bell-btn">
+            ⚠ Alerts <span class="alert-bell-count" id="headerAlertCount">0</span>
+        </a>
+        <div class="status">
+            <span id="healthStatusDot" class="status-dot live"></span>
+            <span id="healthStatusText">Monitoring</span>
+        </div>
+    </div>
+</div>
+
+<!-- Tab bar -->
+<div class="tab-bar">
+    <button class="tab-btn active" data-tab="disk"     type="button">◧ Disk</button>
+    <button class="tab-btn"         data-tab="services" type="button">⚙ Services</button>
+    <button class="tab-btn"         data-tab="resources" type="button">◎ Resources</button>
+</div>
+
+<!-- ══ DISK TAB ══════════════════════════════════════════════ -->
+<div id="tab-disk" class="tab-panel active">
+    <div class="toolbar">
+        <div class="metrics">
+            <div class="metric">Filesystems: <strong id="fsCount">{{ disk_metrics.get('filesystems', []) | length }}</strong></div>
+            <div class="metric">Last snapshot: <strong id="diskLastUpdate">{{ disk_status.updated_at or '—' }}</strong></div>
+        </div>
+    </div>
+
+    {% if disk_metrics.get('filesystems') %}
+    <div style="display:grid;gap:9px;margin-bottom:16px;">
+        {% for fs in disk_metrics.filesystems %}
+        {% set pct = fs.used_pct | replace('%','') | int %}
+        <div class="panel" style="padding:13px 16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
+                <div>
+                    <span style="font-weight:600;color:var(--text);font-size:0.92rem;">{{ fs.mount_point }}</span>
+                    <span style="color:var(--muted);font-size:0.78rem;margin-left:9px;">{{ fs.filesystem }}</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;font-size:0.82rem;">
+                    <span style="color:var(--muted);">{{ fs.available }} free</span>
+                    <span class="{% if pct >= 85 %}text-danger{% elif pct >= 70 %}text-warning{% else %}text-success{% endif %}" style="font-weight:700;font-size:0.96rem;min-width:44px;text-align:right;">{{ fs.used_pct }}</span>
+                </div>
+            </div>
+            <div class="progress-bar-wrap {% if pct >= 85 %}progress-danger{% elif pct >= 70 %}progress-warn{% else %}progress-ok{% endif %}">
+                <div class="progress-bar-fill" style="width:{{ pct }}%;"></div>
+            </div>
+            {% if fs.get('inode_used_pct') and fs.inode_used_pct != '-' %}
+            {% set ipct = fs.inode_used_pct | replace('%','') | int %}
+            <div style="margin-top:5px;display:flex;align-items:center;gap:8px;">
+                <span style="font-size:0.74rem;color:var(--muted);">Inodes</span>
+                <div class="progress-bar-wrap {% if ipct >= 80 %}progress-danger{% elif ipct >= 60 %}progress-warn{% else %}progress-ok{% endif %}" style="width:80px;display:inline-block;">
+                    <div class="progress-bar-fill" style="width:{{ ipct }}%;"></div>
+                </div>
+                <span style="font-size:0.74rem;{% if ipct >= 80 %}color:var(--danger);{% elif ipct >= 60 %}color:var(--warning);{% else %}color:var(--muted);{% endif %}">{{ fs.inode_used_pct }}</span>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <section class="table-shell panel">
+        <table id="diskTable">
+            <thead><tr><th>Filesystem</th><th>Mount</th><th>Size</th><th>Used</th><th>Avail</th><th>Used %</th><th>Inode %</th></tr></thead>
+            <tbody id="diskBody">
+                {% for fs in disk_metrics.filesystems or [] %}
+                {% set pct = fs.used_pct | replace('%','') | int %}
+                <tr>
+                    <td>{{ fs.filesystem }}</td>
+                    <td style="font-weight:500;color:var(--text);">{{ fs.mount_point }}</td>
+                    <td>{{ fs.size }}</td><td>{{ fs.used }}</td><td>{{ fs.available }}</td>
+                    <td class="{% if pct >= 85 %}text-danger text-bold{% elif pct >= 70 %}text-warning text-bold{% else %}text-success{% endif %}">{{ fs.used_pct }}</td>
+                    <td class="{% if (fs.inode_used_pct or '0%') | replace('%','') | int >= 80 %}text-danger{% else %}text-muted{% endif %}">{{ fs.inode_used_pct or '—' }}</td>
+                </tr>
+                {% endfor %}
+                {% if not disk_metrics.filesystems %}
+                <tr><td colspan="7" class="empty">No disk snapshot yet.</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </section>
+</div>
+
+<!-- ══ SERVICES TAB ══════════════════════════════════════════ -->
+<div id="tab-services" class="tab-panel">
+    <div class="toolbar">
+        <div class="metrics">
+            <div class="metric">Failed: <strong id="failedCount" style="color:{% if (service_metrics.failed_count or 0) > 0 %}var(--danger){% else %}var(--success){% endif %};">{{ service_metrics.failed_count or 0 }}</strong></div>
+            <div class="metric">Observed: <strong id="observedCount">{{ service_metrics.services | length if service_metrics.services else 0 }}</strong></div>
+            <div class="metric">Last snapshot: <strong id="svcLastUpdate">{{ svc_status.updated_at or '—' }}</strong></div>
+        </div>
+        <div class="controls">
+            <input class="search-input" id="svcSearch" type="text" placeholder="Filter services…">
+        </div>
+    </div>
+
+    {% if (service_metrics.failed_count or 0) > 0 %}
+    <div style="margin-bottom:12px;padding:10px 14px;border:1px solid rgba(248,113,113,0.28);border-radius:var(--radius-sm);background:rgba(248,113,113,0.07);display:flex;align-items:center;gap:9px;">
+        <span class="badge badge-danger">{{ service_metrics.failed_count }} Failed</span>
+        <span style="color:var(--danger);font-size:0.86rem;font-weight:500;">
+            {{ service_metrics.services | selectattr('state','equalto','failed') | map(attribute='service_name') | join(', ') }}
+        </span>
+    </div>
+    {% endif %}
+
+    <section class="table-shell panel">
+        <table><thead><tr><th>Service</th><th>Load</th><th>State</th><th>Substate</th></tr></thead>
+        <tbody id="serviceBody">
+            {% for svc in service_metrics.services or [] %}
+            <tr class="svc-row" data-name="{{ svc.service_name }}">
+                <td style="font-weight:500;color:var(--text);font-family:'Consolas','Cascadia Code',monospace;font-size:0.80rem;">{{ svc.service_name }}</td>
+                <td>{{ svc.load }}</td>
+                <td>{% if svc.state == 'failed' %}<span class="badge badge-danger">{{ svc.state }}</span>{% elif svc.state == 'active' %}<span class="badge badge-success">{{ svc.state }}</span>{% else %}<span class="badge badge-muted">{{ svc.state }}</span>{% endif %}</td>
+                <td>{% if svc.substate == 'running' %}<span class="text-success">{{ svc.substate }}</span>{% elif svc.substate in ['failed','dead'] %}<span class="text-danger">{{ svc.substate }}</span>{% else %}<span class="text-muted">{{ svc.substate }}</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+            {% if not service_metrics.services %}
+            <tr><td colspan="4" class="empty">No service snapshot yet.</td></tr>
+            {% endif %}
+        </tbody></table>
+    </section>
+</div>
+
+<!-- ══ RESOURCES TAB ═════════════════════════════════════════ -->
+<div id="tab-resources" class="tab-panel">
+    <div class="toolbar">
+        <div class="metrics">
+            <div class="metric">Last snapshot: <strong id="resLastUpdate">{{ res_status.updated_at or '—' }}</strong></div>
+        </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">
+        <!-- CPU Load -->
+        <div class="panel" style="padding:18px 20px;">
+            <div class="overview-card" style="border:none;background:none;padding:0;">
+                <h3>CPU Load Average</h3>
+                {% set res = resource_metrics %}
+                {% if res %}
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+                    {% for label, val in [('1 min', res.load_1m), ('5 min', res.load_5m), ('15 min', res.load_15m)] %}
+                    <div style="text-align:center;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:rgba(167,139,250,0.05);">
+                        <div style="font-size:0.74rem;color:var(--muted);margin-bottom:6px;">{{ label }}</div>
+                        <div style="font-size:1.8rem;font-weight:700;letter-spacing:-0.04em;color:var(--text);">{{ val or '—' }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p style="color:var(--muted);font-size:0.86rem;">No resource snapshot yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Memory -->
+        <div class="panel" style="padding:18px 20px;">
+            <div class="overview-card" style="border:none;background:none;padding:0;">
+                <h3>Memory</h3>
+                {% if res %}
+                {% set mem_total = res.memory_total_mb | int %}
+                {% set mem_used  = res.memory_used_mb  | int %}
+                {% set mem_free  = res.memory_free_mb  | int %}
+                {% set mem_pct   = ((mem_used / mem_total * 100) | int) if mem_total > 0 else 0 %}
+                <div style="display:flex;justify-content:space-between;margin-bottom:10px;font-size:0.84rem;">
+                    <span style="color:var(--muted);">Used</span>
+                    <span class="{% if mem_pct >= 85 %}text-danger{% elif mem_pct >= 70 %}text-warning{% else %}text-success{% endif %}" style="font-weight:600;">{{ mem_pct }}%</span>
+                </div>
+                <div class="progress-bar-wrap {% if mem_pct >= 85 %}progress-danger{% elif mem_pct >= 70 %}progress-warn{% else %}progress-ok{% endif %}" style="margin-bottom:10px;">
+                    <div class="progress-bar-fill" style="width:{{ mem_pct }}%;"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:0.80rem;">
+                    <div><span style="color:var(--muted);">Total</span><div style="color:var(--text);font-weight:600;">{{ mem_total }} MB</div></div>
+                    <div><span style="color:var(--muted);">Used</span><div style="color:var(--text);font-weight:600;">{{ mem_used }} MB</div></div>
+                    <div><span style="color:var(--muted);">Free</span><div class="text-success" style="font-weight:600;">{{ mem_free }} MB</div></div>
+                </div>
+                {% else %}
+                <p style="color:var(--muted);font-size:0.86rem;">No resource snapshot yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Network -->
+        <div class="panel" style="padding:18px 20px;">
+            <div class="overview-card" style="border:none;background:none;padding:0;">
+                <h3>Network Connections</h3>
+                {% set net = network_metrics %}
+                {% if net %}
+                <div style="font-size:2.8rem;font-weight:700;letter-spacing:-0.05em;color:var(--accent-strong);">{{ net.connection_count or 0 }}</div>
+                <div style="color:var(--muted);font-size:0.84rem;margin-top:4px;">active connections observed</div>
+                <div style="margin-top:12px;max-height:120px;overflow:auto;">
+                    {% for line in (net.get('sample', []) or [])[:8] %}
+                    <div style="font-size:0.74rem;color:var(--muted);font-family:'Consolas','Cascadia Code',monospace;padding:2px 0;">{{ line }}</div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p style="color:var(--muted);font-size:0.86rem;">No network snapshot yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Up/Down trend placeholder -->
+        <div class="panel" style="padding:18px 20px;">
+            <div class="overview-card" style="border:none;background:none;padding:0;">
+                <h3>Source Status</h3>
+                <div style="display:grid;gap:6px;">
+                    {% set all_status = {} %}
+                    {% for src in ['disk_usage', 'memory_cpu', 'service_health', 'network_state'] %}
+                    {% set s = source_status.get(src, {}) %}
+                    <div class="source-status-row">
+                        <span class="source-name" style="font-size:0.80rem;">{{ src }}</span>
+                        {% if s.get('available') %}<span class="badge badge-success">Online</span>
+                        {% elif s.get('state') == 'error' %}<span class="badge badge-danger">Error</span>
+                        {% else %}<span class="badge badge-muted">Offline</span>{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    /* ── Tab switching ── */
+    document.querySelectorAll(".tab-btn").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            document.querySelectorAll(".tab-btn").forEach(function(b){ b.classList.remove("active"); });
+            document.querySelectorAll(".tab-panel").forEach(function(p){ p.classList.remove("active"); });
+            btn.classList.add("active");
+            document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+        });
+    });
+
+    /* ── Service search ── */
+    document.getElementById("svcSearch").addEventListener("input", function() {
+        var q = this.value.toLowerCase();
+        document.querySelectorAll(".svc-row").forEach(function(r){ r.style.display = r.dataset.name.toLowerCase().includes(q) ? "" : "none"; });
+    });
+
+    /* ── Live updates via global socket ── */
+    if (!window._globalSocket) return;
+
+    window._globalSocket.on("log", function(msg) {
+        /* Disk live update */
+        if (msg.source_id === "disk_usage") {
+            var parsed = msg.parsed || {};
+            var fss = parsed.filesystems || [];
+            var tbody = document.getElementById("diskBody");
+            if (tbody && fss.length) {
+                tbody.innerHTML = "";
+                fss.forEach(function(fs) {
+                    var pct = parseInt((fs.used_pct||"0").replace("%",""))||0;
+                    var row = document.createElement("tr");
+                    var pctClass = pct>=85?"text-danger text-bold":pct>=70?"text-warning text-bold":"text-success";
+                    [["",fs.filesystem],["font-weight:500;color:var(--text);",fs.mount_point],["",fs.size],["",fs.used],["",fs.available]].forEach(function(cell){
+                        var td = document.createElement("td"); td.style.cssText = cell[0]; td.textContent = cell[1]||"—"; row.appendChild(td);
+                    });
+                    var ptd = document.createElement("td"); ptd.className = pctClass; ptd.textContent = fs.used_pct||"—"; row.appendChild(ptd);
+                    var itd = document.createElement("td"); itd.className = (parseInt((fs.inode_used_pct||"0").replace("%",""))||0)>=80?"text-danger":"text-muted"; itd.textContent = fs.inode_used_pct||"—"; row.appendChild(itd);
+                    tbody.appendChild(row);
+                });
+            }
+            document.getElementById("fsCount").textContent = String(fss.length);
+            document.getElementById("diskLastUpdate").textContent = new Date().toLocaleTimeString();
+        }
+
+        /* Services live update */
+        if (msg.source_id === "service_health") {
+            var parsed = msg.parsed || {};
+            var svcs = parsed.services || [];
+            document.getElementById("failedCount").textContent = String(parsed.failed_count||0);
+            document.getElementById("failedCount").style.color = (parsed.failed_count||0)>0?"var(--danger)":"var(--success)";
+            document.getElementById("observedCount").textContent = String(svcs.length);
+            document.getElementById("svcLastUpdate").textContent = new Date().toLocaleTimeString();
+            var tbody2 = document.getElementById("serviceBody");
+            if (tbody2) {
+                tbody2.innerHTML = "";
+                svcs.forEach(function(svc){
+                    var row = document.createElement("tr"); row.className="svc-row"; row.dataset.name=svc.service_name||"";
+                    var n=document.createElement("td"); n.style.cssText="font-weight:500;color:var(--text);font-family:'Consolas','Cascadia Code',monospace;font-size:0.80rem;"; n.textContent=svc.service_name||"—"; row.appendChild(n);
+                    var l=document.createElement("td"); l.textContent=svc.load||"—"; row.appendChild(l);
+                    var s=document.createElement("td"); var sb=document.createElement("span"); sb.className=svc.state==="failed"?"badge badge-danger":svc.state==="active"?"badge badge-success":"badge badge-muted"; sb.textContent=svc.state||"—"; s.appendChild(sb); row.appendChild(s);
+                    var ss=document.createElement("td"); var ssb=document.createElement("span"); ssb.className=svc.substate==="running"?"text-success":(svc.substate==="failed"||svc.substate==="dead")?"text-danger":"text-muted"; ssb.textContent=svc.substate||"—"; ss.appendChild(ssb); row.appendChild(ss);
+                    tbody2.appendChild(row);
+                });
+            }
+        }
+
+        /* Resource live update */
+        if (msg.source_id === "memory_cpu") {
+            document.getElementById("resLastUpdate").textContent = new Date().toLocaleTimeString();
+        }
+    });
+}());
+</script>
+{% endblock %}

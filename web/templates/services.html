@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Services{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <h1 class="title">Service Health</h1>
+        <p class="subtitle">Running and failed service states captured from the remote host via read-only telemetry.</p>
+    </div>
+    <div class="status">
+        <span id="svcStatusDot" class="status-dot {% if source_status.available %}live{% endif %}"></span>
+        <span id="svcStatusText">{{ source_status.state or "unknown" }}</span>
+    </div>
+</section>
+
+<section class="toolbar">
+    <div class="metrics">
+        <div class="metric {% if (service_metrics.failed_count or 0) > 0 %}{% endif %}">
+            Failed:
+            <strong id="failedCount" style="color:{% if (service_metrics.failed_count or 0) > 0 %}var(--danger){% else %}var(--success){% endif %};">
+                {{ service_metrics.failed_count or 0 }}
+            </strong>
+        </div>
+        <div class="metric">Observed: <strong id="observedCount">{{ service_metrics.services | length if service_metrics.services else 0 }}</strong></div>
+        <div class="metric">Last snapshot: <strong id="svcLastUpdate">{{ source_status.updated_at or '—' }}</strong></div>
+    </div>
+    <div class="controls">
+        <input class="search-input" id="svcSearch" type="text" placeholder="Filter services…">
+    </div>
+</section>
+
+{% if (service_metrics.failed_count or 0) > 0 %}
+<div style="margin-bottom:14px;padding:12px 16px;border:1px solid rgba(255,107,122,0.28);border-radius:var(--radius-sm);background:rgba(255,107,122,0.07);display:flex;align-items:center;gap:10px;">
+    <span class="badge badge-danger">{{ service_metrics.failed_count }} Failed</span>
+    <span style="color:var(--danger);font-size:0.88rem;font-weight:500;">
+        {{ service_metrics.services | selectattr('state','equalto','failed') | map(attribute='service_name') | join(', ') }}
+    </span>
+</div>
+{% endif %}
+
+<section class="table-shell panel">
+    <table>
+        <thead>
+            <tr>
+                <th>Service</th>
+                <th>Load</th>
+                <th>State</th>
+                <th>Substate</th>
+            </tr>
+        </thead>
+        <tbody id="serviceBody">
+            {% for service in service_metrics.services or [] %}
+            <tr class="svc-row" data-name="{{ service.service_name }}">
+                <td style="font-weight:500;color:var(--text);font-family:'Consolas','Cascadia Code',monospace;font-size:0.82rem;">{{ service.service_name }}</td>
+                <td>{{ service.load }}</td>
+                <td>
+                    {% if service.state == 'failed' %}
+                        <span class="badge badge-danger">{{ service.state }}</span>
+                    {% elif service.state == 'active' %}
+                        <span class="badge badge-success">{{ service.state }}</span>
+                    {% else %}
+                        <span class="badge badge-muted">{{ service.state }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if service.substate == 'running' %}
+                        <span class="text-success">{{ service.substate }}</span>
+                    {% elif service.substate == 'failed' or service.substate == 'dead' %}
+                        <span class="text-danger">{{ service.substate }}</span>
+                    {% else %}
+                        <span class="text-muted">{{ service.substate }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not service_metrics.services %}
+            <tr><td colspan="4" class="empty">No service snapshot yet. Is the collector running?</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    /* Search filter */
+    document.getElementById("svcSearch").addEventListener("input", function() {
+        var q = this.value.toLowerCase();
+        document.querySelectorAll(".svc-row").forEach(function(row) {
+            row.style.display = row.dataset.name.toLowerCase().includes(q) ? "" : "none";
+        });
+    });
+
+    if (!window._globalSocket) { return; }
+
+    window._globalSocket.on("log", function(msg) {
+        if (msg.source_id !== "service_health") { return; }
+        var parsed = msg.parsed || {};
+        var services = parsed.services || [];
+
+        document.getElementById("svcStatusDot").classList.add("live");
+        document.getElementById("svcStatusText").textContent = "Updated";
+        document.getElementById("svcLastUpdate").textContent = new Date().toLocaleTimeString();
+        document.getElementById("failedCount").textContent = String(parsed.failed_count || 0);
+        document.getElementById("failedCount").style.color = (parsed.failed_count || 0) > 0 ? "var(--danger)" : "var(--success)";
+        document.getElementById("observedCount").textContent = String(services.length);
+
+        var tbody = document.getElementById("serviceBody");
+        if (!tbody) { return; }
+        tbody.innerHTML = "";
+
+        services.forEach(function(svc) {
+            var row = document.createElement("tr");
+            row.className = "svc-row";
+            row.dataset.name = svc.service_name || "";
+
+            var nameTd = document.createElement("td");
+            nameTd.style.fontWeight = "500";
+            nameTd.style.color = "var(--text)";
+            nameTd.style.fontFamily = "'Consolas','Cascadia Code',monospace";
+            nameTd.style.fontSize = "0.82rem";
+            nameTd.textContent = svc.service_name || "—";
+            row.appendChild(nameTd);
+
+            var loadTd = document.createElement("td");
+            loadTd.textContent = svc.load || "—";
+            row.appendChild(loadTd);
+
+            var stateTd = document.createElement("td");
+            var stateBadge = document.createElement("span");
+            stateBadge.className = svc.state === "failed" ? "badge badge-danger" : svc.state === "active" ? "badge badge-success" : "badge badge-muted";
+            stateBadge.textContent = svc.state || "—";
+            stateTd.appendChild(stateBadge);
+            row.appendChild(stateTd);
+
+            var subTd = document.createElement("td");
+            var subSpan = document.createElement("span");
+            subSpan.className = svc.substate === "running" ? "text-success" : (svc.substate === "failed" || svc.substate === "dead") ? "text-danger" : "text-muted";
+            subSpan.textContent = svc.substate || "—";
+            subTd.appendChild(subSpan);
+            row.appendChild(subTd);
+
+            tbody.appendChild(row);
+        });
+    });
+}());
+</script>
+{% endblock %}

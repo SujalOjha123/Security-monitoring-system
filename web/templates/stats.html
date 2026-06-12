@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}Statistics{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <h1 class="title">Unique IP Statistics</h1>
+        <p class="subtitle">
+            Persistent unique source IP records with country, first seen, last seen, hit count, and observed timestamps.
+            Backed by <strong>{{ current_stats_file }}</strong>.
+        </p>
+    </div>
+    <div class="status">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">Connecting</span>
+    </div>
+</section>
+
+<section class="toolbar">
+    <div class="metrics stats-metrics-grid">
+        <div class="metric">Unique IPs: <strong id="uniqueIpCount">0</strong></div>
+        <div class="metric">Total hits: <strong id="totalHitCount">0</strong></div>
+        <div class="metric">Countries: <strong id="countryCount">0</strong></div>
+        <div class="metric">Last update: <strong id="lastUpdate">Waiting</strong></div>
+    </div>
+    <div class="controls">
+        <input class="search-input" id="statsSearch" type="text" placeholder="Search IP or country…">
+        <button id="exportCsv" type="button">Export CSV</button>
+        <button id="exportJson" type="button">Export JSON</button>
+        <button id="exportPdf" type="button">Export PDF</button>
+    </div>
+</section>
+
+<section class="table-shell panel">
+    <table>
+        <thead>
+            <tr>
+                <th>IP</th>
+                <th>Country</th>
+                <th>First Seen</th>
+                <th>Last Seen</th>
+                <th>Hits</th>
+                <th>Recent Timestamps</th>
+            </tr>
+        </thead>
+        <tbody id="statsBody">
+            <tr><td colspan="6" class="empty">Waiting for unique IP activity…</td></tr>
+        </tbody>
+    </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    var INITIAL_STATS = {{ initial_stats | tojson }};
+
+    var statusDot     = document.getElementById("statusDot");
+    var statusText    = document.getElementById("statusText");
+    var uniqueIpCount = document.getElementById("uniqueIpCount");
+    var totalHitCount = document.getElementById("totalHitCount");
+    var countryCount  = document.getElementById("countryCount");
+    var lastUpdate    = document.getElementById("lastUpdate");
+    var statsBody     = document.getElementById("statsBody");
+    var statsSearch   = document.getElementById("statsSearch");
+    var searchQuery   = "";
+
+    var statsByIp = new Map();
+
+    function setStatus(live, label) {
+        statusText.textContent = label;
+        statusDot.classList.toggle("live", live);
+    }
+
+    function fmtTime(val) {
+        if (!val) { return "—"; }
+        try { return new Date(val).toLocaleString(); } catch(e) { return val; }
+    }
+
+    /* Country flag emoji from 2-letter code */
+    function countryFlag(code) {
+        if (!code || code.length !== 2) { return ""; }
+        try {
+            return String.fromCodePoint(
+                0x1F1E6 - 65 + code.toUpperCase().charCodeAt(0),
+                0x1F1E6 - 65 + code.toUpperCase().charCodeAt(1)
+            ) + " ";
+        } catch(e) { return ""; }
+    }
+
+    function upsert(record) {
+        if (!record || !record.ip) { return; }
+        var existing = statsByIp.get(record.ip);
+        if (!existing) {
+            statsByIp.set(record.ip, {
+                ip:           record.ip,
+                country:      record.country || null,
+                country_code: record.country_code || null,
+                city:         record.city || null,
+                first_seen:   record.first_seen,
+                last_seen:    record.last_seen,
+                hit_count:    record.hit_count || 0,
+                timestamps:   Array.isArray(record.timestamps) ? record.timestamps.slice() : []
+            });
+            return;
+        }
+        existing.country      = record.country      || existing.country;
+        existing.country_code = record.country_code || existing.country_code;
+        existing.city         = record.city         || existing.city;
+        existing.first_seen   = existing.first_seen || record.first_seen;
+        existing.last_seen    = record.last_seen    || existing.last_seen;
+        existing.hit_count    = record.hit_count !== undefined ? record.hit_count : existing.hit_count + 1;
+        if (Array.isArray(record.timestamps) && record.timestamps.length > 0) {
+            existing.timestamps = record.timestamps.slice();
+        }
+    }
+
+    function renderTable() {
+        var rows = Array.from(statsByIp.values()).sort(function(a, b) {
+            return (b.last_seen || "").localeCompare(a.last_seen || "");
+        });
+
+        /* Apply search */
+        var q = searchQuery.toLowerCase();
+        var filtered = q ? rows.filter(function(r) {
+            return (r.ip || "").toLowerCase().includes(q) || (r.country || "").toLowerCase().includes(q) || (r.city || "").toLowerCase().includes(q);
+        }) : rows;
+
+        /* Update counters from ALL rows (not filtered) */
+        uniqueIpCount.textContent = String(rows.length);
+        totalHitCount.textContent = String(rows.reduce(function(s, r) { return s + (r.hit_count || 0); }, 0));
+        countryCount.textContent  = String(new Set(rows.map(function(r) { return r.country || "Unknown"; })).size);
+
+        /* Clear and rebuild — safe textContent throughout */
+        while (statsBody.firstChild) { statsBody.removeChild(statsBody.firstChild); }
+
+        if (filtered.length === 0) {
+            var empty = document.createElement("tr");
+            var td = document.createElement("td");
+            td.colSpan = 6;
+            td.className = "empty";
+            td.textContent = q ? "No results for \"" + q + "\"." : "Waiting for unique IP activity…";
+            empty.appendChild(td);
+            statsBody.appendChild(empty);
+            return;
+        }
+
+        filtered.forEach(function(record) {
+            var row = document.createElement("tr");
+
+            function addTd(text, opts) {
+                opts = opts || {};
+                var td = document.createElement("td");
+                td.textContent = text;
+                if (opts.mono) { td.style.fontFamily = "'Consolas','Cascadia Code',monospace"; td.style.fontSize = "0.84rem"; }
+                row.appendChild(td);
+            }
+
+            addTd(record.ip, { mono: true });
+
+            /* Country with flag */
+            var cTd = document.createElement("td");
+            cTd.textContent = countryFlag(record.country_code) + (record.country || "—");
+            row.appendChild(cTd);
+
+            addTd(fmtTime(record.first_seen));
+            addTd(fmtTime(record.last_seen));
+            addTd(String(record.hit_count || 0));
+
+            /* Timestamps — last 5 only */
+            var tsTd = document.createElement("td");
+            var tsSpan = document.createElement("span");
+            tsSpan.style.display = "block";
+            tsSpan.style.maxWidth = "320px";
+            tsSpan.style.whiteSpace = "pre-wrap";
+            tsSpan.style.wordBreak = "break-word";
+            tsSpan.style.lineHeight = "1.45";
+            tsSpan.style.fontSize = "0.78rem";
+            tsSpan.style.color = "var(--muted)";
+            var last5 = (record.timestamps || []).slice(-5).map(fmtTime);
+            tsSpan.textContent = last5.join("\n") || "—";
+            tsTd.appendChild(tsSpan);
+            row.appendChild(tsTd);
+
+            statsBody.appendChild(row);
+        });
+    }
+
+    statsSearch.addEventListener("input", function() {
+        searchQuery = this.value;
+        renderTable();
+    });
+
+    if (window._globalSocket) {
+        window._globalSocket.on("connect",    function() { setStatus(true,  "Connected"); });
+        window._globalSocket.on("disconnect", function() { setStatus(false, "Disconnected"); });
+        window._globalSocket.on("log", function(msg) {
+            if (msg.source_id !== "nginx_access") { return; }
+            var parsed = msg.parsed || {};
+            if (!parsed.ip || !msg.received_at) { return; }
+
+            var existing = statsByIp.get(parsed.ip);
+            var liveRecord = {
+                ip:           parsed.ip,
+                country:      msg.geo ? msg.geo.country : null,
+                country_code: msg.geo ? msg.geo.country_code : null,
+                city:         msg.geo ? msg.geo.city : null,
+                first_seen:   existing ? existing.first_seen : msg.received_at,
+                last_seen:    msg.received_at,
+                hit_count:    existing ? existing.hit_count + 1 : 1,
+                timestamps:   existing ? existing.timestamps.concat([msg.received_at]) : [msg.received_at]
+            };
+            upsert(liveRecord);
+            lastUpdate.textContent = new Date(msg.received_at).toLocaleTimeString();
+            renderTable();
+        });
+        setStatus(true, "Connected");
+    }
+
+    INITIAL_STATS.forEach(function(r) { upsert(r); });
+    if (INITIAL_STATS.length > 0) {
+        var newest = INITIAL_STATS.reduce(function(l, r) { return (r.last_seen || "") > l ? (r.last_seen || l) : l; }, "");
+        if (newest) { lastUpdate.textContent = new Date(newest).toLocaleTimeString(); }
+    }
+
+    renderTable();
+
+    document.getElementById("exportCsv").addEventListener("click",  function() { window.location.href = "/stats/export.csv"; });
+    document.getElementById("exportJson").addEventListener("click", function() { window.location.href = "/stats/export.json"; });
+    document.getElementById("exportPdf").addEventListener("click",  function() { window.open("/stats/print", "_blank", "noopener,noreferrer"); });
+}());
+</script>
+{% endblock %}

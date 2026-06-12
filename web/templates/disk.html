@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Disk{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <h1 class="title">Disk Usage</h1>
+        <p class="subtitle">Filesystem and inode usage from the latest read-only host snapshot.</p>
+    </div>
+    <div class="status">
+        <span id="diskStatusDot" class="status-dot {% if source_status.available %}live{% endif %}"></span>
+        <span id="diskStatusText">{{ source_status.state or "unknown" }}</span>
+    </div>
+</section>
+
+<section class="toolbar">
+    <div class="metrics">
+        <div class="metric">Filesystems: <strong id="fsCount">{{ disk_metrics.get('filesystems', []) | length }}</strong></div>
+        <div class="metric">Last snapshot: <strong id="diskLastUpdate">{{ source_status.updated_at or '—' }}</strong></div>
+    </div>
+</section>
+
+<!-- Visual usage bars -->
+{% if disk_metrics.get('filesystems') %}
+<div style="display:grid;gap:10px;margin-bottom:18px;">
+    {% for fs in disk_metrics.filesystems %}
+    {% set pct = fs.used_pct | replace('%','') | int %}
+    <div class="panel" style="padding:14px 18px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div>
+                <span style="font-weight:600;color:var(--text);font-size:0.94rem;">{{ fs.mount_point }}</span>
+                <span style="color:var(--muted);font-size:0.80rem;margin-left:10px;">{{ fs.filesystem }}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:14px;">
+                <span style="color:var(--muted);font-size:0.82rem;">Available: {{ fs.available }}</span>
+                <span class="{% if pct >= 85 %}text-danger{% elif pct >= 70 %}text-warning{% else %}text-success{% endif %}" style="font-weight:700;font-size:1rem;min-width:46px;text-align:right;">{{ fs.used_pct }}</span>
+            </div>
+        </div>
+        <div class="progress-bar-wrap {% if pct >= 85 %}progress-danger{% elif pct >= 70 %}progress-warn{% else %}progress-ok{% endif %}" style="width:100%;display:block;">
+            <div class="progress-bar-fill" style="width:{{ pct }}%;"></div>
+        </div>
+        {% if fs.get('inode_used_pct') and fs.inode_used_pct != '-' %}
+        {% set ipct = fs.inode_used_pct | replace('%','') | int %}
+        <div style="margin-top:6px;display:flex;align-items:center;gap:8px;">
+            <span style="font-size:0.76rem;color:var(--muted);">Inodes:</span>
+            <div class="progress-bar-wrap {% if ipct >= 80 %}progress-danger{% elif ipct >= 60 %}progress-warn{% else %}progress-ok{% endif %}" style="width:80px;display:inline-block;">
+                <div class="progress-bar-fill" style="width:{{ ipct }}%;"></div>
+            </div>
+            <span style="font-size:0.76rem;{% if ipct >= 80 %}color:var(--danger);{% elif ipct >= 60 %}color:var(--warning);{% else %}color:var(--muted);{% endif %}">{{ fs.inode_used_pct }}</span>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<section class="table-shell panel">
+    <table id="diskTable">
+        <thead>
+            <tr>
+                <th>Filesystem</th>
+                <th>Mount</th>
+                <th>Size</th>
+                <th>Used</th>
+                <th>Available</th>
+                <th>Used %</th>
+                <th>Inode Used %</th>
+            </tr>
+        </thead>
+        <tbody id="diskBody">
+            {% for fs in disk_metrics.filesystems or [] %}
+            {% set pct = fs.used_pct | replace('%','') | int %}
+            <tr>
+                <td>{{ fs.filesystem }}</td>
+                <td style="font-weight:500;color:var(--text);">{{ fs.mount_point }}</td>
+                <td>{{ fs.size }}</td>
+                <td>{{ fs.used }}</td>
+                <td>{{ fs.available }}</td>
+                <td class="{% if pct >= 85 %}text-danger text-bold{% elif pct >= 70 %}text-warning text-bold{% else %}text-success{% endif %}">{{ fs.used_pct }}</td>
+                <td class="{% if (fs.inode_used_pct or '0%') | replace('%','') | int >= 80 %}text-danger{% else %}text-muted{% endif %}">{{ fs.inode_used_pct or "—" }}</td>
+            </tr>
+            {% endfor %}
+            {% if not disk_metrics.filesystems %}
+            <tr><td colspan="7" class="empty">No disk snapshot yet. Is the collector running?</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+    if (!window._globalSocket) { return; }
+
+    window._globalSocket.on("log", function(msg) {
+        if (msg.source_id !== "disk_usage") { return; }
+        var parsed = msg.parsed || {};
+        var filesystems = parsed.filesystems || [];
+
+        /* Update status dot */
+        document.getElementById("diskStatusDot").classList.add("live");
+        document.getElementById("diskStatusText").textContent = "Updated";
+        document.getElementById("diskLastUpdate").textContent = new Date().toLocaleTimeString();
+        document.getElementById("fsCount").textContent = String(filesystems.length);
+
+        /* Rebuild table body */
+        var tbody = document.getElementById("diskBody");
+        if (!tbody || filesystems.length === 0) { return; }
+        tbody.innerHTML = "";
+        filesystems.forEach(function(fs) {
+            var pct = parseInt((fs.used_pct || "0").replace("%", "")) || 0;
+            var ipct = parseInt((fs.inode_used_pct || "0").replace("%", "")) || 0;
+            var pctClass = pct >= 85 ? "text-danger text-bold" : pct >= 70 ? "text-warning text-bold" : "text-success";
+            var ipctClass = ipct >= 80 ? "text-danger" : "text-muted";
+
+            var row = document.createElement("tr");
+            ["filesystem","mount_point","size","used","available"].forEach(function(key) {
+                var td = document.createElement("td");
+                td.textContent = fs[key] || "—";
+                if (key === "mount_point") { td.style.fontWeight = "500"; td.style.color = "var(--text)"; }
+                row.appendChild(td);
+            });
+            var pctTd = document.createElement("td");
+            pctTd.className = pctClass;
+            pctTd.textContent = fs.used_pct || "—";
+            row.appendChild(pctTd);
+
+            var iptd = document.createElement("td");
+            iptd.className = ipctClass;
+            iptd.textContent = fs.inode_used_pct || "—";
+            row.appendChild(iptd);
+
+            tbody.appendChild(row);
+        });
+    });
+}());
+</script>
+{% endblock %}

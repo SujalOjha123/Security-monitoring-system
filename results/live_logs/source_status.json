@@ -1,0 +1,26 @@
+{
+  "disk_usage": {
+    "available": true,
+    "detail": "Snapshot updated",
+    "state": "healthy",
+    "updated_at": "2026-04-25T22:10:05"
+  },
+  "nginx_access": {
+    "available": true,
+    "detail": "Tailing /var/log/nginx/access.log",
+    "state": "streaming",
+    "updated_at": "2026-04-25T22:09:47"
+  },
+  "nginx_error": {
+    "available": true,
+    "detail": "Tailing /var/log/nginx/error.log",
+    "state": "streaming",
+    "updated_at": "2026-04-25T20:56:51"
+  },
+  "service_health": {
+    "available": true,
+    "detail": "Snapshot updated",
+    "state": "healthy",
+    "updated_at": "2026-04-25T22:10:05"
+  }
+}

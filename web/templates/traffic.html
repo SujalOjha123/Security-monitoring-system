@@ -1,0 +1,397 @@
+{% extends "base.html" %}
+{% block title %}Web Traffic{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-header-left">
+        <h1 class="title">Web Traffic</h1>
+        <p class="subtitle">Live Nginx access stream, parsed structured view, and geographic origin map — all in one place.</p>
+    </div>
+    <div class="page-header-right">
+        <a href="/alerts" class="alert-bell-btn" id="alertBellBtn">
+            ⚠ Alerts <span class="alert-bell-count" id="headerAlertCount">{{ initial_alerts | length }}</span>
+        </a>
+        <div class="status">
+            <span id="statusDot" class="status-dot"></span>
+            <span id="statusText">Connecting</span>
+        </div>
+    </div>
+</div>
+
+<!-- Tab bar -->
+<div class="tab-bar">
+    <button class="tab-btn active" data-tab="raw" type="button">
+        ▶ Raw Stream
+    </button>
+    <button class="tab-btn" data-tab="structured" type="button">
+        ⊞ Structured View
+    </button>
+    <button class="tab-btn" data-tab="map" type="button">
+        ◎ Origin Map
+    </button>
+</div>
+
+<!-- ══ RAW TAB ══════════════════════════════════════════════ -->
+<div id="tab-raw" class="tab-panel active">
+    <div class="toolbar">
+        <div class="metrics">
+            <div class="metric">Lines: <strong id="lineCount">0</strong></div>
+            <div class="metric">Last update: <strong id="rawLastUpdate">Waiting</strong></div>
+        </div>
+        <div class="controls">
+            <label><input id="rawAutoScroll" type="checkbox" checked> Auto-scroll</label>
+            <button id="clearRaw" type="button">Clear</button>
+        </div>
+    </div>
+    <div id="logs" class="panel empty">Waiting for log stream…</div>
+</div>
+
+<!-- ══ STRUCTURED TAB ════════════════════════════════════════ -->
+<div id="tab-structured" class="tab-panel">
+    <div class="toolbar">
+        <div class="metrics">
+            <div class="metric">Entries: <strong id="entryCount">0</strong></div>
+            <div class="metric">Parsed: <strong id="parsedCount">0</strong></div>
+            <div class="metric">Unmatched: <strong id="unmatchedCount">0</strong></div>
+            <div class="metric">Last update: <strong id="strLastUpdate">Waiting</strong></div>
+        </div>
+        <div class="controls">
+            <label><input id="strAutoScroll" type="checkbox" checked> Auto-scroll</label>
+            <button id="clearStr" type="button">Clear</button>
+        </div>
+    </div>
+    <section id="logStream" class="log-stream panel empty">Waiting for parsed log stream…</section>
+</div>
+
+<!-- ══ MAP TAB ═══════════════════════════════════════════════ -->
+<div id="tab-map" class="tab-panel">
+    <div class="toolbar">
+        <div class="metrics">
+            <div class="metric">Mapped IPs: <strong id="mappedCount">0</strong></div>
+            <div class="metric">Unique origins: <strong id="uniqueCount">0</strong></div>
+            <div class="metric">Last update: <strong id="mapLastUpdate">Waiting</strong></div>
+        </div>
+        <div class="controls">
+            <button id="fitMap" type="button">Fit markers</button>
+        </div>
+    </div>
+    <div id="countryLegend" class="country-legend"></div>
+    <div class="map-shell">
+        <div id="originMap" class="panel"></div>
+        <section id="originFeed" class="map-feed panel empty">Waiting for mapped entries…</section>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+(function () {
+    "use strict";
+
+    var INITIAL_ENTRIES = {{ initial_entries | tojson }};
+    var SOURCE_ID = "nginx_access";
+    var MAX_LINES  = 500;
+    var MAX_STR    = 250;
+
+    /* ── Tab switching ── */
+    var tabPanels  = document.querySelectorAll(".tab-panel");
+    var tabBtns    = document.querySelectorAll(".tab-btn");
+    var mapInitialized = false;
+
+    tabBtns.forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            var target = btn.dataset.tab;
+            tabBtns.forEach(function(b) { b.classList.remove("active"); });
+            tabPanels.forEach(function(p) { p.classList.remove("active"); });
+            btn.classList.add("active");
+            document.getElementById("tab-" + target).classList.add("active");
+
+            /* Initialize map only when map tab first shown */
+            if (target === "map" && !mapInitialized) {
+                mapInitialized = true;
+                initMap();
+            }
+        });
+    });
+
+    /* ── Status ── */
+    var statusDot  = document.getElementById("statusDot");
+    var statusText = document.getElementById("statusText");
+
+    function setStatus(live, label) {
+        statusText.textContent = label;
+        statusDot.classList.toggle("live", live);
+    }
+
+    /* ═══════════════════════════════════════════
+       RAW tab
+    ═══════════════════════════════════════════ */
+    var logsEl      = document.getElementById("logs");
+    var lineCount   = document.getElementById("lineCount");
+    var rawLastUpdate = document.getElementById("rawLastUpdate");
+    var rawAutoScroll = document.getElementById("rawAutoScroll");
+    var clearRaw    = document.getElementById("clearRaw");
+    var lineBuffer  = [];
+
+    function appendLine(text) {
+        var wasEmpty = logsEl.classList.contains("empty");
+        if (wasEmpty) { while(logsEl.firstChild) logsEl.removeChild(logsEl.firstChild); logsEl.classList.remove("empty"); }
+        var p = document.createElement("p");
+        p.textContent = text;
+        logsEl.appendChild(p);
+        lineBuffer.push(p);
+        while (lineBuffer.length > MAX_LINES) {
+            var old = lineBuffer.shift();
+            if (old.parentNode) old.parentNode.removeChild(old);
+        }
+        lineCount.textContent = String(lineBuffer.length);
+        if (rawAutoScroll.checked) { logsEl.scrollTop = logsEl.scrollHeight; }
+    }
+
+    /* Seed raw */
+    if (INITIAL_ENTRIES.length > 0) {
+        INITIAL_ENTRIES.slice(-MAX_LINES).forEach(function(e) { appendLine(e.raw); });
+        rawLastUpdate.textContent = new Date(INITIAL_ENTRIES[INITIAL_ENTRIES.length - 1].received_at).toLocaleTimeString();
+        logsEl.scrollTop = logsEl.scrollHeight;
+    }
+
+    clearRaw.addEventListener("click", function() {
+        while(logsEl.firstChild) logsEl.removeChild(logsEl.firstChild);
+        lineBuffer = [];
+        logsEl.classList.add("empty");
+        logsEl.textContent = "Waiting for log stream…";
+        rawLastUpdate.textContent = "Cleared";
+        lineCount.textContent = "0";
+    });
+
+    /* ═══════════════════════════════════════════
+       STRUCTURED tab
+    ═══════════════════════════════════════════ */
+    var logStream    = document.getElementById("logStream");
+    var entryCount   = document.getElementById("entryCount");
+    var parsedCount  = document.getElementById("parsedCount");
+    var unmatchedCount = document.getElementById("unmatchedCount");
+    var strLastUpdate = document.getElementById("strLastUpdate");
+    var strAutoScroll = document.getElementById("strAutoScroll");
+    var clearStr     = document.getElementById("clearStr");
+    var strEntries   = INITIAL_ENTRIES.slice().reverse().map(function(e){ return e.parsed; });
+
+    function statusClass(code) {
+        var c = parseInt(code, 10);
+        if (c >= 500) return "status-5xx";
+        if (c >= 400) return "status-4xx";
+        if (c >= 300) return "status-3xx";
+        if (c >= 200) return "status-2xx";
+        return "text-muted";
+    }
+
+    function methodClass(m) {
+        var map = { GET:"method-GET", POST:"method-POST", PUT:"method-PUT", PATCH:"method-PATCH", DELETE:"method-DELETE" };
+        return "method-pill " + (map[(m||"").toUpperCase()] || "method-OTHER");
+    }
+
+    function makeField(label, value) {
+        var div = document.createElement("div"); div.className = "log-field";
+        var lbl = document.createElement("span"); lbl.className = "field-label"; lbl.textContent = label;
+        var val = document.createElement("span"); val.textContent = value || "—";
+        div.appendChild(lbl); div.appendChild(val); return div;
+    }
+
+    function renderCard(entry) {
+        var card = document.createElement("article");
+        card.className = "log-card" + (entry.matched ? "" : " unmatched");
+
+        var top = document.createElement("div"); top.className = "log-top";
+        var req = document.createElement("div"); req.className = "request-line";
+
+        if (entry.matched && entry.method) {
+            var mp = document.createElement("span"); mp.className = methodClass(entry.method); mp.textContent = entry.method; req.appendChild(mp);
+            req.appendChild(document.createTextNode(" "));
+        }
+        var pathSpan = document.createElement("span");
+        pathSpan.textContent = entry.matched ? [entry.path, entry.protocol].filter(Boolean).join(" ") : "Unmatched log format";
+        req.appendChild(pathSpan);
+
+        var pill = document.createElement("span"); pill.className = "pill";
+        if (entry.matched && entry.status) {
+            pill.textContent = "Status ";
+            var cs = document.createElement("span"); cs.className = statusClass(entry.status); cs.textContent = entry.status; pill.appendChild(cs);
+        } else { pill.textContent = "Raw only"; }
+
+        top.appendChild(req); top.appendChild(pill); card.appendChild(top);
+
+        var fields = document.createElement("div"); fields.className = "log-fields";
+        fields.appendChild(makeField("IP", entry.ip));
+        fields.appendChild(makeField("Timestamp", entry.timestamp));
+        fields.appendChild(makeField("Method", entry.method));
+        fields.appendChild(makeField("Path", entry.path));
+        fields.appendChild(makeField("Bytes", entry.size));
+        fields.appendChild(makeField("User-Agent", entry.user_agent));
+        card.appendChild(fields);
+
+        var raw = document.createElement("pre"); raw.className = "raw-line"; raw.textContent = entry.raw || ""; card.appendChild(raw);
+        return card;
+    }
+
+    function renderStream() {
+        while(logStream.firstChild) logStream.removeChild(logStream.firstChild);
+        if (strEntries.length === 0) {
+            logStream.textContent = "Waiting for parsed log stream…"; logStream.classList.add("empty");
+        } else {
+            logStream.classList.remove("empty");
+            strEntries.forEach(function(e) { logStream.appendChild(renderCard(e)); });
+        }
+        entryCount.textContent     = String(strEntries.length);
+        parsedCount.textContent    = String(strEntries.filter(function(e){ return e.matched; }).length);
+        unmatchedCount.textContent = String(strEntries.filter(function(e){ return !e.matched; }).length);
+        if (strAutoScroll.checked) logStream.scrollTop = 0;
+    }
+
+    renderStream();
+
+    clearStr.addEventListener("click", function() { strEntries = []; strLastUpdate.textContent = "Cleared"; renderStream(); });
+
+    /* ═══════════════════════════════════════════
+       MAP tab
+    ═══════════════════════════════════════════ */
+    var map, markersByIp, colorsByCountry, feedEntries, mappedEvents;
+    var COUNTRY_COLORS = ["#a78bfa","#34d399","#67e8f9","#fbbf24","#f87171","#c084fc","#6ee7b7","#93c5fd","#fcd34d","#d8b4fe"];
+    var fitMapBtn  = document.getElementById("fitMap");
+    var originFeed = document.getElementById("originFeed");
+    var countryLegend = document.getElementById("countryLegend");
+
+    function initMap() {
+        markersByIp = new Map(); colorsByCountry = new Map(); feedEntries = []; mappedEvents = 0;
+
+        map = L.map("originMap", { worldCopyJump: true, minZoom: 2 }).setView([20, 0], 2);
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+            maxZoom: 18, attribution: "&copy; OpenStreetMap &copy; CARTO"
+        }).addTo(map);
+
+        INITIAL_ENTRIES.forEach(function(e) { addMapEntry(e, false); });
+        renderMapLegend();
+        fitMarkers();
+
+        fitMapBtn.addEventListener("click", fitMarkers);
+    }
+
+    function getColor(country) {
+        var key = country || "Unknown";
+        if (!colorsByCountry.has(key)) {
+            colorsByCountry.set(key, COUNTRY_COLORS[colorsByCountry.size % COUNTRY_COLORS.length]);
+            renderMapLegend();
+        }
+        return colorsByCountry.get(key);
+    }
+
+    function renderMapLegend() {
+        countryLegend.innerHTML = "";
+        Array.from(colorsByCountry.entries()).sort(function(a,b){ return a[0].localeCompare(b[0]); }).forEach(function(e) {
+            var item = document.createElement("div"); item.className = "legend-item";
+            var sw = document.createElement("span"); sw.className = "legend-swatch"; sw.style.backgroundColor = e[1];
+            var lb = document.createElement("span"); lb.textContent = e[0];
+            item.appendChild(sw); item.appendChild(lb); countryLegend.appendChild(item);
+        });
+    }
+
+    function fitMarkers() {
+        if (!map) return;
+        if (markersByIp.size === 0) { map.setView([20,0],2); return; }
+        var bounds = L.latLngBounds(Array.from(markersByIp.values()).map(function(i){ return i.marker.getLatLng(); }));
+        map.fitBounds(bounds.pad(0.25));
+    }
+
+    function addMapEntry(entry, refit) {
+        if (!entry.geo || entry.geo.latitude === undefined) return;
+        var key = entry.geo.ip;
+        var color = getColor(entry.geo.country);
+        var existing = markersByIp.get(key);
+
+        if (existing) {
+            existing.count++;
+            existing.marker.setStyle({ color: color, fillColor: color });
+            existing.marker.setPopupContent(popupText(entry, existing));
+            pulseMarker(existing.marker);
+        } else {
+            var marker = L.circleMarker([entry.geo.latitude, entry.geo.longitude], {
+                radius: 7, color: color, weight: 1.5, fillColor: color, fillOpacity: 0.75
+            }).addTo(map);
+            var state = { marker: marker, count: 1 };
+            marker.bindPopup(popupText(entry, state));
+            markersByIp.set(key, state);
+        }
+
+        mappedEvents++;
+        feedEntries.unshift(entry);
+        if (feedEntries.length > 120) feedEntries = feedEntries.slice(0, 120);
+        document.getElementById("mappedCount").textContent = String(mappedEvents);
+        document.getElementById("uniqueCount").textContent = String(markersByIp.size);
+        renderMapFeed();
+        if (entry.received_at) document.getElementById("mapLastUpdate").textContent = new Date(entry.received_at).toLocaleTimeString();
+        if (refit) fitMarkers();
+    }
+
+    function popupText(entry, stats) {
+        var g = entry.geo || {}, p = entry.parsed || {};
+        return [g.ip || "Unknown", (g.city && g.country) ? g.city + ", " + g.country : (g.country || "Unknown"),
+                p.path ? "Path: " + p.path : null, "Hits: " + stats.count].filter(Boolean).join("\n");
+    }
+
+    function pulseMarker(marker) {
+        var el = marker.getElement(); if (!el) return;
+        el.classList.remove("ip-marker-pulse"); void el.getBoundingClientRect(); el.classList.add("ip-marker-pulse");
+        setTimeout(function() { el.classList.remove("ip-marker-pulse"); }, 2800);
+    }
+
+    function renderMapFeed() {
+        while(originFeed.firstChild) originFeed.removeChild(originFeed.firstChild);
+        if (feedEntries.length === 0) {
+            originFeed.textContent = "Waiting for mapped entries…"; originFeed.classList.add("empty"); return;
+        }
+        originFeed.classList.remove("empty");
+        feedEntries.forEach(function(entry) {
+            var card = document.createElement("article"); card.className = "feed-card";
+            var title = document.createElement("strong");
+            title.textContent = (entry.geo.ip || "?") + " • " + (entry.geo.city || entry.geo.country || "Unknown");
+            var text = document.createElement("p");
+            text.textContent = [entry.geo.country || "-", entry.parsed && entry.parsed.path ? entry.parsed.path : null].filter(Boolean).join(" | ");
+            card.appendChild(title); card.appendChild(text); originFeed.appendChild(card);
+        });
+    }
+
+    /* ═══════════════════════════════════════════
+       Shared Socket listener
+    ═══════════════════════════════════════════ */
+    if (window._globalSocket) {
+        window._globalSocket.on("connect",    function() { setStatus(true,  "Connected"); });
+        window._globalSocket.on("disconnect", function() { setStatus(false, "Disconnected"); });
+        window._globalSocket.on("log", function(msg) {
+            if (msg.source_id !== SOURCE_ID) return;
+
+            /* Raw */
+            appendLine(msg.raw);
+            rawLastUpdate.textContent = new Date(msg.received_at).toLocaleTimeString();
+
+            /* Structured */
+            strEntries.unshift(msg.parsed);
+            if (strEntries.length > MAX_STR) strEntries = strEntries.slice(0, MAX_STR);
+            strLastUpdate.textContent = new Date(msg.received_at).toLocaleTimeString();
+            if (document.getElementById("tab-structured").classList.contains("active")) renderStream();
+
+            /* Map */
+            if (mapInitialized) addMapEntry(msg, false);
+        });
+        setStatus(true, "Connected");
+    }
+
+    if (INITIAL_ENTRIES.length > 0) {
+        strLastUpdate.textContent = rawLastUpdate.textContent;
+    }
+}());
+</script>
+{% endblock %}

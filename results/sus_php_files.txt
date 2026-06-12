@@ -1,0 +1,22 @@
+4063610      4 -r--r--r--   1 www-data www-data       863 Sep 14  2023 /var/www/html/studentportal/uploads/certificates/0027ca49ca6975634133b979a3ae5c58.php
+  1086571      8 -r--r--r--   1 www-data www-data      6672 Dec 25 13:23 /var/www/html/studentportal/uploads/certificates/d13804ac80e9b5da62c96d68a0b1da00.php
+  1108669     48 -r--r--r--   1 www-data www-data     48678 Dec 30 23:51 /var/www/html/studentportal/uploads/studentsigns/0023846da9413fc28943a806676d18ea.php
+  1108668     48 -r--r--r--   1 www-data www-data     48678 Dec 30 23:50 /var/www/html/studentportal/uploads/citizenship/e5550f7232d5d99bb5874d1aa586.php
+  1179649     12 -rw-r--r--   1 www-data www-data      8262 Dec 31 00:03 /var/www/html/studentportal/uploads/citizenship/00607e30136d4d9c68b270d04452583a.php
+  1183208      0 -rw-r--r--   1 www-data www-data         0 Feb 18 19:24 /var/www/html/studentportal/uploads/citizenship/.quarantine/tr.php_NEW_1771442692.php
+  1182718      0 -rw-r--r--   1 www-data www-data         0 Feb  6 00:29 /var/www/html/studentportal/uploads/citizenship/.quarantine/tr.php_NEW_1770337801.php
+  1180719      0 -rw-r--r--   1 www-data www-data         0 Dec 31 19:06 /var/www/html/studentportal/uploads/citizenship/.quarantine/index.php_NEW_1767207980.php
+  1182720      4 -rw-r--r--   1 www-data www-data      3134 Feb  6 00:36 /var/www/html/studentportal/uploads/citizenship/.quarantine/tr.php_NEW_1770338204.php
+  1182719      4 -rw-r--r--   1 www-data www-data      3134 Feb  6 00:32 /var/www/html/studentportal/uploads/citizenship/.quarantine/tr.php_MOD_1770337935.php
+  1111549      8 -rw-r--r--   1 www-data www-data      5803 Jan 31 13:22 /var/www/html/studentportal/uploads/citizenship/.quarantine/eecb99552b480453b647a9572444b21e.php_NEW_1769865779.php
+  1310981      4 -r--r--r--   1 www-data www-data      1024 Oct 27 21:35 /var/www/html/studentportal/uploads/citizenship/.quarantine/index.php_NEW_1767185955.php
+  1111551      8 -rw-r--r--   1 www-data www-data      4449 Jan 31 13:46 /var/www/html/studentportal/uploads/citizenship/.quarantine/db2cc1827f83ce081fee8b1c062ee470.php_NEW_1769867171.php
+  1180723    292 -rw-r--r--   1 www-data www-data    297524 Dec 31 12:58 /var/www/html/studentportal/uploads/citizenship/.quarantine/index.php_NEW_1767219177.php
+  1183309     24 -rw-r--r--   1 www-data www-data     20990 Mar 13 01:52 /var/www/html/studentportal/uploads/citizenship/.quarantine/6ed67437460e59b125bcedc1d7f465a5.php_NEW_1773366751.php
+  1111550      8 -rw-r--r--   1 www-data www-data      5803 Jan 31 13:36 /var/www/html/studentportal/uploads/citizenship/.quarantine/14eb317e73338e2fa38f29952ac5b150.phar_NEW_1769866589.php
+  1182981      0 -rw-r--r--   1 www-data www-data         0 Feb 14 01:51 /var/www/html/studentportal/uploads/citizenship/.quarantine/tr.php_NEW_1771033912.php
+  1182982      4 -rw-r--r--   1 www-data www-data      3134 Feb 14 01:54 /var/www/html/studentportal/uploads/citizenship/.quarantine/tr.php_MOD_1771034046.php
+  1182983      4 -rw-r--r--   1 www-data www-data      3134 Feb 14 01:58 /var/www/html/studentportal/uploads/citizenship/.quarantine/tr.php_NEW_1771034315.php
+  1183209      4 -rw-r--r--   1 www-data www-data      3134 Feb 18 19:24 /var/www/html/studentportal/uploads/citizenship/.quarantine/tr.php_MOD_1771442698.php
+  1182518     16 -rw-r--r--   1 www-data www-data     12758 Jan 31 06:06 /var/www/html/studentportal/uploads/citizenship/.quarantine/aace950e7ca57bd56eb55482837fa957.php_NEW_1769839613.php
+  4063814     36 -r--r--r--   1 www-data www-data     35613 Nov 14 20:01 /var/www/html/studentportal/uploads/citizenship/error_log.php

@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}Alerts{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <h1 class="title">Security Alerts</h1>
+        <p class="subtitle">
+            Alerts for suspicious behaviour — executable uploads, traversal probes, SQLi/XSS patterns, web shells, scanner activity, and brute-force sequences. Persisted in <strong>{{ current_alert_file }}</strong>.
+        </p>
+    </div>
+    <div class="status">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">Connecting</span>
+    </div>
+</section>
+
+<section class="toolbar">
+    <div class="metrics">
+        <div class="metric">Shown: <strong id="alertCount">0</strong></div>
+        <div class="metric">Total: <strong id="totalAlertCount">0</strong></div>
+        <div class="metric">Last alert: <strong id="lastUpdate">Waiting</strong></div>
+    </div>
+</section>
+
+<section id="filterBar" class="filter-bar"></section>
+
+<section id="alertStream" class="alert-stream panel empty">
+    Waiting for alerts…
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    var INITIAL_ALERTS = {{ initial_alerts | tojson }};
+    var MAX_ALERTS = 300;
+
+    var statusDot       = document.getElementById("statusDot");
+    var statusText      = document.getElementById("statusText");
+    var alertCountEl    = document.getElementById("alertCount");
+    var totalCountEl    = document.getElementById("totalAlertCount");
+    var lastUpdateEl    = document.getElementById("lastUpdate");
+    var alertStream     = document.getElementById("alertStream");
+    var filterBar       = document.getElementById("filterBar");
+
+    var ATTACK_LABELS = {
+        all:          "All",
+        availability: "Availability",
+        upload_abuse: "Upload Abuse",
+        sqli:         "SQLi",
+        brute_force:  "Brute Force",
+        traversal:    "Traversal",
+        xss:          "XSS",
+        webshell:     "Web Shell",
+        scanner:      "Scanner",
+        tooling:      "Tooling",
+        beaconing:    "Beaconing"
+    };
+
+    var alerts = INITIAL_ALERTS.slice();
+    var activeFilter = "all";
+
+    function setStatus(live, label) {
+        statusText.textContent = label;
+        statusDot.classList.toggle("live", live);
+    }
+
+    function normalizeType(alert) {
+        if (alert.attack_type) { return alert.attack_type; }
+        var ruleId = alert.rule_id || "";
+        if (ruleId.indexOf("sqli")         !== -1) { return "sqli"; }
+        if (ruleId.indexOf("traversal")    !== -1) { return "traversal"; }
+        if (ruleId.indexOf("xss")          !== -1) { return "xss"; }
+        if (ruleId.indexOf("webshell")     !== -1) { return "webshell"; }
+        if (ruleId.indexOf("scanner")      !== -1) { return "scanner"; }
+        if (ruleId.indexOf("user_agent")   !== -1) { return "tooling"; }
+        if (ruleId.indexOf("bruteforce")   !== -1) { return "brute_force"; }
+        if (ruleId.indexOf("disk_pressure") !== -1 || ruleId.indexOf("inode_pressure") !== -1 || ruleId.indexOf("service_failure") !== -1 || ruleId.indexOf("error_spike") !== -1) { return "availability"; }
+        if (ruleId.indexOf("repeated")     !== -1) { return "beaconing"; }
+        if (ruleId.indexOf("upload")       !== -1 || ruleId.indexOf("php") !== -1) { return "upload_abuse"; }
+        return "all";
+    }
+
+    function getVisible() {
+        if (activeFilter === "all") { return alerts; }
+        return alerts.filter(function(a) { return normalizeType(a) === activeFilter; });
+    }
+
+    /* Safe text helper — NO innerHTML for user data */
+    function setText(el, text) { el.textContent = text || "—"; }
+
+    function makeField(label, value) {
+        var div = document.createElement("div");
+        div.className = "alert-field";
+        var strong = document.createElement("strong");
+        strong.textContent = label;
+        var span = document.createElement("span");
+        setText(span, value);
+        div.appendChild(strong);
+        div.appendChild(span);
+        return div;
+    }
+
+    function renderCard(alert) {
+        var severity = (alert.severity || "medium").toLowerCase();
+        var card = document.createElement("article");
+        card.className = "alert-card severity-" + severity;
+
+        /* Top row */
+        var top = document.createElement("div");
+        top.className = "alert-top";
+
+        var titleEl = document.createElement("div");
+        titleEl.className = "alert-title";
+        setText(titleEl, alert.title || "Alert");
+
+        var sev = document.createElement("span");
+        sev.className = "severity-pill " + severity;
+        sev.textContent = severity;
+
+        top.appendChild(titleEl);
+        top.appendChild(sev);
+        card.appendChild(top);
+
+        /* Meta fields */
+        var meta = document.createElement("div");
+        meta.className = "alert-meta";
+        var ts = alert.timestamp ? new Date(alert.timestamp).toLocaleString() : "—";
+        meta.appendChild(makeField("IP", alert.ip));
+        meta.appendChild(makeField("Country", alert.country));
+        meta.appendChild(makeField("Time", ts));
+        meta.appendChild(makeField("Method", alert.method));
+        meta.appendChild(makeField("HTTP Status", alert.status));
+        meta.appendChild(makeField("Attack Type", ATTACK_LABELS[normalizeType(alert)] || normalizeType(alert)));
+        meta.appendChild(makeField("Rule", alert.rule_id));
+        card.appendChild(meta);
+
+        /* Path */
+        var pathEl = document.createElement("p");
+        pathEl.className = "alert-description";
+        setText(pathEl, alert.path);
+        card.appendChild(pathEl);
+
+        /* Description */
+        if (alert.description) {
+            var descEl = document.createElement("p");
+            descEl.className = "alert-description";
+            setText(descEl, alert.description);
+            card.appendChild(descEl);
+        }
+
+        /* Raw log */
+        var rawPre = document.createElement("pre");
+        rawPre.className = "raw-log";
+        setText(rawPre, alert.raw || "Full raw log not stored for this alert.");
+        card.appendChild(rawPre);
+
+        return card;
+    }
+
+    function renderFilters() {
+        filterBar.innerHTML = "";
+        var counts = { all: alerts.length };
+        alerts.forEach(function(a) {
+            var t = normalizeType(a);
+            counts[t] = (counts[t] || 0) + 1;
+        });
+
+        Object.keys(ATTACK_LABELS).forEach(function(type) {
+            if (type !== "all" && !counts[type]) { return; }
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "filter-button" + (activeFilter === type ? " active" : "");
+            btn.textContent = ATTACK_LABELS[type] + " (" + (counts[type] || 0) + ")";
+            btn.addEventListener("click", function() {
+                activeFilter = type;
+                renderFilters();
+                renderAlerts();
+            });
+            filterBar.appendChild(btn);
+        });
+    }
+
+    function renderAlerts() {
+        while (alertStream.firstChild) { alertStream.removeChild(alertStream.firstChild); }
+        totalCountEl.textContent = String(alerts.length);
+
+        var visible = getVisible();
+        if (visible.length === 0) {
+            alertStream.textContent = "Waiting for alerts…";
+            alertStream.classList.add("empty");
+            alertCountEl.textContent = "0";
+            return;
+        }
+
+        alertStream.classList.remove("empty");
+        visible.forEach(function(a) { alertStream.appendChild(renderCard(a)); });
+        alertCountEl.textContent = String(visible.length);
+        alertStream.scrollTop = 0;
+    }
+
+    /* Socket */
+    if (window._globalSocket) {
+        window._globalSocket.on("connect",    function() { setStatus(true,  "Connected"); });
+        window._globalSocket.on("disconnect", function() { setStatus(false, "Disconnected"); });
+        window._globalSocket.on("log", function(msg) {
+            if (!msg.alerts || msg.alerts.length === 0) { return; }
+            msg.alerts.slice().reverse().forEach(function(a) { alerts.unshift(a); });
+            if (alerts.length > MAX_ALERTS) { alerts = alerts.slice(0, MAX_ALERTS); }
+            lastUpdateEl.textContent = new Date(msg.received_at).toLocaleTimeString();
+            renderFilters();
+            renderAlerts();
+        });
+        /* Mark connected if global socket already open */
+        setStatus(true, "Connected");
+    }
+
+    if (INITIAL_ALERTS.length > 0) {
+        lastUpdateEl.textContent = new Date(INITIAL_ALERTS[0].timestamp).toLocaleTimeString();
+    }
+
+    renderFilters();
+    renderAlerts();
+}());
+</script>
+{% endblock %}

@@ -1,0 +1,234 @@
+PROJECT TRACKER
+Last updated: 2026-04-24
+
+1. Project Definition
+Project name:
+VAPT live log collection and detection dashboard
+
+Current purpose:
+This project SSHes into a remote Linux host with read-only access, collects multiple log and telemetry sources, stores them locally by source and date, and displays them in a web dashboard for live monitoring, history browsing, and alerting.
+
+Current scope:
+- Collect multiple remote sources over SSH
+- Tail readable log files without modifying the host
+- Run lightweight, read-only periodic host snapshot commands
+- Persist locally captured events by source and date
+- Show live raw, structured, map, statistics, alert, health, and history views
+- Keep the web UI separate from the collector so dashboard changes do not require collector restart
+
+2. Runtime Architecture
+Process 1:
+collector_main.py
+- Starts the multi-source SSH collector
+- Loads the source registry
+- Starts a conservative default source set unless ENABLED_SOURCES is configured
+- Tails enabled log sources with staggered startup
+- Polls enabled snapshot sources through a single shared SSH session
+- Parses and normalizes each event
+- Stores per-source daily event files
+- Updates derived stores such as alerts, unique IP stats, metrics_latest, and source_status
+
+Process 2:
+main.py
+- Starts the Flask and Socket.IO web server
+- Watches local per-source daily event files for new entries
+- Pushes saved/live entries to connected browser clients
+
+3. Main Files
+main.py
+- Web server entrypoint only
+
+collector_main.py
+- Multi-source collector entrypoint
+
+collector/fetch_logs.py
+- SSH connection logic for tailed sources and snapshot command sources
+
+collector/source_registry.py
+- Source definitions, categories, parsers, and polling intervals
+
+web/app.py
+- Flask routes and background file watcher for live browser updates
+
+web/log_parser.py
+- Best-effort parser for Nginx access logs
+
+web/source_parsers.py
+- Source-family parsers for access/error/auth/syslog/disk/service/network/resource events
+
+web/log_store.py
+- Source-scoped daily event storage, history listing, source status, and latest metrics storage
+
+web/geoip.py
+- Backend IP geolocation lookup and local geo cache handling
+
+web/unique_ip_store.py
+- Persistent unique-IP statistics store and updater for Nginx access events
+
+web/detector.py
+- Alert detection rules for web attacks, auth brute force, service failure, disk pressure, inode pressure, and error spikes
+
+web/alert_store.py
+- Persistent alert store for suspicious events
+
+4. Data Storage
+Root live log directory:
+results/live_logs/
+
+Per-source daily event files:
+results/live_logs/<source_id>/YYYY-MM-DD.jsonl
+
+Reason for using per-source jsonl:
+- Stores raw and parsed event data together
+- Easy to append
+- Easy to browse by source and date
+- Supports both tailed logs and snapshot telemetry
+
+Each stored event currently contains:
+- source_id
+- source_category
+- collected_at
+- received_at
+- event_type
+- raw
+- parsed
+- optional geo
+- optional alerts
+
+Source status file:
+results/live_logs/source_status.json
+
+Latest metrics file:
+results/live_logs/metrics_latest.json
+
+Geo cache file:
+results/live_logs/geo_cache.json
+
+Unique IP stats file:
+results/live_logs/unique_ips.json
+
+Alert file:
+results/live_logs/alerts.jsonl
+
+5. Libraries Currently Used
+Standard library:
+- os
+- time
+- json
+- re
+- csv
+- shlex
+- ipaddress
+- urllib
+- pathlib
+- datetime
+- collections.deque
+- collections.defaultdict
+- io.StringIO
+- threading
+
+Third-party libraries:
+- Flask
+- Flask-SocketIO
+- paramiko
+- python-dotenv
+
+Present in older/secondary script only:
+- requests in stream_logs.py
+
+6. Current Sources
+Streaming log sources:
+- nginx_access
+- nginx_error
+- auth_log
+- syslog
+- php_fpm_error
+- cron_log
+- kernel_log
+
+Snapshot command sources:
+- disk_usage
+- memory_cpu
+- service_health
+- network_state
+
+7. Current UI Pages
+Page 1:
+/overview
+- Latest source availability and latest snapshot summaries
+
+Page 2:
+/
+- Raw live Nginx access stream
+
+Page 3:
+/structured
+- Structured Nginx access view
+
+Page 4:
+/map
+- Live origin map for Nginx access IPs
+
+Page 5:
+/disk
+- Latest filesystem and inode usage
+
+Page 6:
+/services
+- Latest running and failed service states
+
+Page 7:
+/auth
+- Recent auth-log events and brute-force related alerts
+
+Page 8:
+/errors
+- Recent Nginx/PHP-FPM/syslog/kernel error-oriented events
+
+Page 9:
+/history
+- Local history browser by source and date
+
+Page 10:
+/stats
+- Persistent unique IP statistics view
+- Supports CSV, JSON, and print-to-PDF export
+
+Page 11:
+/alerts
+- Security alerts view
+- Supports attack-type filter buttons and full raw-log display per alert
+
+8. Current Development Workflow
+To run the persistent collector:
+python collector_main.py
+
+To run the web interface:
+python main.py
+
+Expected workflow during development:
+- Keep collector_main.py running
+- Restart only main.py when changing web/frontend code
+
+9. Change Log
+2026-04-24
+- Refactored the collector into a multi-source SSH collector
+- Added a source registry for log tails and command snapshots
+- Moved storage to per-source daily jsonl files
+- Added source_status and metrics_latest stores
+- Added source-family parsers for auth/syslog/error/disk/service/network/resource data
+- Expanded alerts to include auth brute force, service failure, disk pressure, inode pressure, and error spikes
+- Added overview, disk, services, auth, errors, and history pages
+- Updated existing live pages to filter correctly in a multi-source event stream
+- Reduced SSH connection pressure by enabling a conservative default source set, staggering tail startup, and serializing snapshot collection through one SSH session
+- Reworked the shared frontend into a darker SOC-style dashboard theme with a reusable static stylesheet, updated sidebar/navigation, refreshed overview/history/alerts/structured/raw styling, and switched the live map to a dark basemap
+
+10. Update Rule For Future Changes
+When code changes are made, update this file with:
+- New feature or architecture change
+- New route/page/template
+- New storage format or folder
+- New script or entrypoint
+- New source type or collector behavior
+- New Python library introduced
+- Important workflow change

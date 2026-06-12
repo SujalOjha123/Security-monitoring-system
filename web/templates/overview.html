@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-header-left">
+        <h1 class="title">Overview</h1>
+        <p class="subtitle">Live host health, source availability, and active risk posture at a glance.</p>
+    </div>
+    <div class="page-header-right">
+        <a href="/alerts" class="alert-bell-btn" id="alertBellBtn">
+            ⚠ Alerts <span class="alert-bell-count" id="headerAlertCount">{{ recent_alerts | length }}</span>
+        </a>
+        <div id="overviewLastUpdate" class="status" style="font-size:0.80rem;">
+            <span class="status-dot live"></span>
+            <span id="overviewRefreshLabel">Live</span>
+        </div>
+    </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="kpi-grid" id="kpiGrid">
+    <!-- Sources -->
+    {% set available = namespace(count=0) %}
+    {% set total     = namespace(count=0) %}
+    {% for sid, s in source_status.items() %}
+        {% set total.count = total.count + 1 %}
+        {% if s.available %}{% set available.count = available.count + 1 %}{% endif %}
+    {% endfor %}
+    <div class="kpi-card {% if available.count < total.count %}kpi-warning{% else %}kpi-success{% endif %}">
+        <div class="kpi-label">Sources Online</div>
+        <div class="kpi-value" id="kpiSourcesOnline">{{ available.count }}/{{ total.count }}</div>
+        <div class="kpi-sub">collectors active</div>
+    </div>
+
+    <!-- Active Alerts -->
+    <div class="kpi-card {% if recent_alerts %}kpi-danger{% else %}kpi-success{% endif %}">
+        <div class="kpi-label">Recent Alerts</div>
+        <div class="kpi-value" id="kpiAlertCount">{{ recent_alerts | length }}</div>
+        <div class="kpi-sub">in last 300 events</div>
+    </div>
+
+    <!-- Disk -->
+    {% set worst_disk = namespace(pct=0, mount='-') %}
+    {% set disk_data = metrics_latest.get('disk_usage', {}).get('parsed', {}) %}
+    {% for fs in disk_data.get('filesystems', []) %}
+        {% set pct_num = fs.used_pct | replace('%','') %}
+        {% if pct_num | int > worst_disk.pct %}
+            {% set worst_disk.pct = pct_num | int %}
+            {% set worst_disk.mount = fs.mount_point %}
+        {% endif %}
+    {% endfor %}
+    <div class="kpi-card {% if worst_disk.pct >= 85 %}kpi-danger{% elif worst_disk.pct >= 70 %}kpi-warning{% else %}kpi-success{% endif %}">
+        <div class="kpi-label">Worst Disk Usage</div>
+        <div class="kpi-value" id="kpiDiskPct">{% if worst_disk.pct > 0 %}{{ worst_disk.pct }}%{% else %}—{% endif %}</div>
+        <div class="kpi-sub" id="kpiDiskMount">{{ worst_disk.mount }}</div>
+    </div>
+
+    <!-- Failed Services -->
+    {% set svc = metrics_latest.get('service_health', {}).get('parsed', {}) %}
+    {% set fail_count = svc.get('failed_count', 0) or 0 %}
+    <div class="kpi-card {% if fail_count > 0 %}kpi-danger{% else %}kpi-success{% endif %}">
+        <div class="kpi-label">Failed Services</div>
+        <div class="kpi-value" id="kpiFailedSvc">{{ fail_count }}</div>
+        <div class="kpi-sub">service failures</div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="chart-grid">
+    <div class="chart-panel">
+        <h3>Alert Type Breakdown</h3>
+        <canvas id="alertTypeChart" height="180"></canvas>
+    </div>
+    <div class="chart-panel">
+        <h3>Resource Snapshot</h3>
+        {% set res = metrics_latest.get('memory_cpu', {}).get('parsed', {}) %}
+        {% if res %}
+        <div style="margin-bottom:14px;">
+            <div class="kpi-label">CPU Load Average (1m / 5m / 15m)</div>
+            <div style="font-size:1.4rem;font-weight:700;letter-spacing:-0.03em;color:var(--text);">
+                {{ res.load_1m or '—' }}
+                <span style="color:var(--muted);font-size:1rem;"> / {{ res.load_5m or '—' }} / {{ res.load_15m or '—' }}</span>
+            </div>
+        </div>
+        {% set mem_total = res.memory_total_mb | int %}
+        {% set mem_used  = res.memory_used_mb  | int %}
+        {% set mem_pct   = ((mem_used / mem_total * 100) | int) if mem_total > 0 else 0 %}
+        <div class="kpi-label" style="margin-bottom:6px;">Memory — {{ mem_used }} MB / {{ mem_total }} MB</div>
+        <div class="progress-bar-wrap" style="width:100%;display:block;margin-bottom:8px;">
+            <div class="progress-bar-fill" style="
+                width:{{ mem_pct }}%;
+                background: {% if mem_pct >= 85 %}var(--danger){% elif mem_pct >= 70 %}var(--warning){% else %}var(--success){% endif %};
+            "></div>
+        </div>
+        <div style="font-size:0.82rem;color:var(--muted);">{{ mem_pct }}% in use</div>
+        {% else %}
+        <div style="color:var(--muted);font-size:0.88rem;">No resource snapshot yet.</div>
+        {% endif %}
+        <div class="kpi-label" style="margin-top:16px;">Network Connections</div>
+        {% set net = metrics_latest.get('network_state', {}).get('parsed', {}) %}
+        <div style="font-size:1.6rem;font-weight:700;color:var(--text);">{{ net.get('connection_count', '—') }}</div>
+    </div>
+</div>
+
+<!-- Bottom row: Source Status + Disk Detail + Services + Recent Alerts -->
+<div class="overview-grid">
+    <!-- Source Status -->
+    <div class="overview-card">
+        <h3>Source Status</h3>
+        <div class="source-status-list" id="sourceStatusList">
+        {% for source_id, status in source_status.items() %}
+            <div class="source-status-row">
+                <span class="source-name">{{ source_id }}</span>
+                <span class="source-detail">{{ status.detail or '' }}</span>
+                {% if status.available %}
+                    <span class="badge badge-success">Online</span>
+                {% elif status.state == 'error' %}
+                    <span class="badge badge-danger">Error</span>
+                {% else %}
+                    <span class="badge badge-warning">Offline</span>
+                {% endif %}
+            </div>
+        {% endfor %}
+        {% if not source_status %}
+            <div style="color:var(--muted);font-size:0.86rem;">No status yet. Is the collector running?</div>
+        {% endif %}
+        </div>
+    </div>
+
+    <!-- Disk -->
+    <div class="overview-card">
+        <h3>Disk Usage</h3>
+        {% if disk_data.get('filesystems') %}
+        <div style="display:grid;gap:8px;">
+        {% for fs in disk_data.filesystems[:5] %}
+            {% set pct = fs.used_pct | replace('%','') | int %}
+            <div>
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.82rem;">
+                    <span style="color:var(--text);">{{ fs.mount_point }}</span>
+                    <span class="{% if pct >= 85 %}text-danger{% elif pct >= 70 %}text-warning{% else %}text-success{% endif %}" style="font-weight:600;">{{ fs.used_pct }}</span>
+                </div>
+                <div class="progress-bar-wrap {% if pct >= 85 %}progress-danger{% elif pct >= 70 %}progress-warn{% else %}progress-ok{% endif %}" style="width:100%;display:block;">
+                    <div class="progress-bar-fill" style="width:{{ pct }}%;"></div>
+                </div>
+            </div>
+        {% endfor %}
+        </div>
+        {% else %}
+        <div style="color:var(--muted);font-size:0.86rem;">No disk snapshot yet.</div>
+        {% endif %}
+    </div>
+
+    <!-- Services -->
+    <div class="overview-card">
+        <h3>Service Health</h3>
+        {% if svc.get('services') %}
+        <div style="margin-bottom:10px;">
+            <span style="font-size:0.82rem;color:var(--muted);">Failed: </span>
+            <span class="{% if fail_count > 0 %}text-danger{% else %}text-success{% endif %}" style="font-weight:700;font-size:1.1rem;">{{ fail_count }}</span>
+        </div>
+        <div style="display:grid;gap:5px;max-height:160px;overflow:auto;">
+        {% for service in svc.services[:10] %}
+            <div class="source-status-row">
+                <span class="source-name" style="font-size:0.80rem;">{{ service.service_name }}</span>
+                {% if service.state == 'failed' %}
+                    <span class="badge badge-danger">Failed</span>
+                {% elif service.state == 'active' or service.substate == 'running' %}
+                    <span class="badge badge-success">Running</span>
+                {% else %}
+                    <span class="badge badge-muted">{{ service.substate or service.state }}</span>
+                {% endif %}
+            </div>
+        {% endfor %}
+        </div>
+        {% else %}
+        <div style="color:var(--muted);font-size:0.86rem;">No service snapshot yet.</div>
+        {% endif %}
+    </div>
+
+    <!-- Recent Alerts -->
+    <div class="overview-card">
+        <h3>Recent Alerts</h3>
+        {% if recent_alerts %}
+        <div style="display:grid;gap:6px;max-height:200px;overflow:auto;">
+        {% for alert in recent_alerts[:10] %}
+            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid rgba(255,107,122,0.14);border-radius:var(--radius-xs);background:rgba(255,107,122,0.04);font-size:0.82rem;">
+                <span class="severity-pill {{ alert.severity or 'medium' }}" style="font-size:0.68rem;">{{ alert.severity or 'med' }}</span>
+                <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">{{ alert.title }}</span>
+                <span style="color:var(--muted);flex-shrink:0;">{{ (alert.timestamp or '')[-8:] }}</span>
+            </div>
+        {% endfor %}
+        </div>
+        {% else %}
+        <div style="color:var(--muted);font-size:0.86rem;">No alerts yet.</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    /* ── Alert Type Chart ── */
+    var INITIAL_ALERTS = {{ recent_alerts | tojson }};
+
+    var ATTACK_LABELS = {
+        availability: "Availability",
+        upload_abuse: "Upload Abuse",
+        sqli:         "SQLi",
+        brute_force:  "Brute Force",
+        traversal:    "Traversal",
+        xss:          "XSS",
+        webshell:     "Web Shell",
+        scanner:      "Scanner",
+        tooling:      "Tooling",
+        beaconing:    "Beaconing"
+    };
+
+    var CHART_COLORS = [
+        "#ff6b7a","#f0a94e","#4db8ff","#3ecf8e",
+        "#9a8cff","#61d9ff","#ffb86d","#7cd3b5","#c4a6ff","#5da4ff"
+    ];
+
+    function countAlertTypes(alerts) {
+        var counts = {};
+        alerts.forEach(function (a) {
+            var t = a.attack_type || "other";
+            counts[t] = (counts[t] || 0) + 1;
+        });
+        return counts;
+    }
+
+    function buildChart(counts) {
+        var labels = Object.keys(counts).map(function(k){ return ATTACK_LABELS[k] || k; });
+        var data   = Object.values(counts);
+        var colors = labels.map(function(_, i){ return CHART_COLORS[i % CHART_COLORS.length]; });
+
+        var ctx = document.getElementById("alertTypeChart");
+        if (!ctx || typeof Chart === "undefined") { return; }
+
+        return new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    backgroundColor: colors.map(function(c){ return c + "cc"; }),
+                    borderColor: colors,
+                    borderWidth: 1.5,
+                    hoverOffset: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                cutout: "62%",
+                plugins: {
+                    legend: {
+                        position: "right",
+                        labels: {
+                            color: "#7e9ab8",
+                            font: { family: "Inter", size: 11 },
+                            boxWidth: 12,
+                            padding: 10
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                return " " + ctx.label + ": " + ctx.parsed;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    var alertCounts = countAlertTypes(INITIAL_ALERTS);
+    var chart = Object.keys(alertCounts).length > 0 ? buildChart(alertCounts) : null;
+
+    /* Draw empty state text if no data */
+    if (!chart) {
+        var canvas = document.getElementById("alertTypeChart");
+        if (canvas) {
+            var parent = canvas.parentNode;
+            var msg = document.createElement("p");
+            msg.style.color = "var(--muted)";
+            msg.style.fontSize = "0.88rem";
+            msg.style.marginTop = "10px";
+            msg.textContent = "No alert data yet.";
+            parent.appendChild(msg);
+            canvas.style.display = "none";
+        }
+    }
+
+    /* ── Live refresh via shared global socket ── */
+    var refreshLabel = document.getElementById("overviewRefreshLabel");
+    var allAlerts = INITIAL_ALERTS.slice();
+
+    function reloadOverview() {
+        fetch("/api/overview-stats")
+            .then(function(r){ return r.json(); })
+            .then(function(data) {
+                /* Update KPI: sources */
+                var kpiSrc = document.getElementById("kpiSourcesOnline");
+                if (kpiSrc && data.source_status) {
+                    var avail = 0, total = 0;
+                    Object.values(data.source_status).forEach(function(s){
+                        total++;
+                        if (s.available) { avail++; }
+                    });
+                    kpiSrc.textContent = avail + "/" + total;
+                }
+
+                /* Update KPI: alerts */
+                var kpiAlerts = document.getElementById("kpiAlertCount");
+                if (kpiAlerts && data.recent_alert_count !== undefined) {
+                    kpiAlerts.textContent = String(data.recent_alert_count);
+                }
+
+                refreshLabel.textContent = "Updated " + new Date().toLocaleTimeString();
+            })
+            .catch(function() {
+                refreshLabel.textContent = "Refresh failed";
+            });
+    }
+
+    /* Poll every 30s for overview stats */
+    setInterval(reloadOverview, 30000);
+
+    /* Real-time chart updates from socket */
+    if (window._globalSocket) {
+        window._globalSocket.on("log", function(msg) {
+            if (!msg.alerts || msg.alerts.length === 0) { return; }
+            msg.alerts.forEach(function(alert) {
+                allAlerts.unshift(alert);
+            });
+            if (allAlerts.length > 300) { allAlerts = allAlerts.slice(0, 300); }
+
+            var newCounts = countAlertTypes(allAlerts);
+            if (chart && Object.keys(newCounts).length > 0) {
+                chart.data.labels   = Object.keys(newCounts).map(function(k){ return ATTACK_LABELS[k] || k; });
+                chart.data.datasets[0].data = Object.values(newCounts);
+                chart.update("none");
+            }
+
+            var kpiAlerts = document.getElementById("kpiAlertCount");
+            if (kpiAlerts) { kpiAlerts.textContent = String(allAlerts.length); }
+            refreshLabel.textContent = "Updated " + new Date().toLocaleTimeString();
+        });
+    }
+}());
+</script>
+{% endblock %}

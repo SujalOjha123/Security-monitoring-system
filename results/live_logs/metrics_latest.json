@@ -1,0 +1,373 @@
+{
+  "disk_usage": {
+    "parsed": {
+      "filesystems": [
+        {
+          "available": "3.9G",
+          "filesystem": "udev",
+          "inode_available": "1004086",
+          "inode_total": "1004565",
+          "inode_used": "479",
+          "inode_used_pct": "1%",
+          "mount_point": "/dev",
+          "size": "3.9G",
+          "used": "0",
+          "used_pct": "0%"
+        },
+        {
+          "available": "794M",
+          "filesystem": "tmpfs",
+          "inode_available": "1016099",
+          "inode_total": "1016886",
+          "inode_used": "787",
+          "inode_used_pct": "1%",
+          "mount_point": "/run",
+          "size": "795M",
+          "used": "1.3M",
+          "used_pct": "1%"
+        },
+        {
+          "available": "2.3G",
+          "filesystem": "/dev/mapper/ubuntu--vg-ubuntu--lv",
+          "inode_available": "6022970",
+          "inode_total": "6553600",
+          "inode_used": "530630",
+          "inode_used_pct": "9%",
+          "mount_point": "/",
+          "size": "98G",
+          "used": "91G",
+          "used_pct": "98%"
+        },
+        {
+          "available": "3.9G",
+          "filesystem": "tmpfs",
+          "inode_available": "1016885",
+          "inode_total": "1016886",
+          "inode_used": "1",
+          "inode_used_pct": "1%",
+          "mount_point": "/dev/shm",
+          "size": "3.9G",
+          "used": "0",
+          "used_pct": "0%"
+        },
+        {
+          "available": "5.0M",
+          "filesystem": "tmpfs",
+          "inode_available": "1016883",
+          "inode_total": "1016886",
+          "inode_used": "3",
+          "inode_used_pct": "1%",
+          "mount_point": "/run/lock",
+          "size": "5.0M",
+          "used": "0",
+          "used_pct": "0%"
+        },
+        {
+          "available": "3.9G",
+          "filesystem": "tmpfs",
+          "inode_available": "1016868",
+          "inode_total": "1016886",
+          "inode_used": "18",
+          "inode_used_pct": "1%",
+          "mount_point": "/sys/fs/cgroup",
+          "size": "3.9G",
+          "used": "0",
+          "used_pct": "0%"
+        },
+        {
+          "available": "1.2G",
+          "filesystem": "/dev/sda2",
+          "inode_available": "97988",
+          "inode_total": "98304",
+          "inode_used": "316",
+          "inode_used_pct": "1%",
+          "mount_point": "/boot",
+          "size": "1.5G",
+          "used": "221M",
+          "used_pct": "16%"
+        },
+        {
+          "available": "0",
+          "filesystem": "/dev/loop4",
+          "inode_available": "0",
+          "inode_total": "11908",
+          "inode_used": "11908",
+          "inode_used_pct": "100%",
+          "mount_point": "/snap/core20/2717",
+          "size": "64M",
+          "used": "64M",
+          "used_pct": "100%"
+        },
+        {
+          "available": "0",
+          "filesystem": "/dev/loop7",
+          "inode_available": "0",
+          "inode_total": "815",
+          "inode_used": "815",
+          "inode_used_pct": "100%",
+          "mount_point": "/snap/lxd/38333",
+          "size": "92M",
+          "used": "92M",
+          "used_pct": "100%"
+        },
+        {
+          "available": "0",
+          "filesystem": "/dev/loop1",
+          "inode_available": "0",
+          "inode_total": "617",
+          "inode_used": "617",
+          "inode_used_pct": "100%",
+          "mount_point": "/snap/snapd/26382",
+          "size": "49M",
+          "used": "49M",
+          "used_pct": "100%"
+        },
+        {
+          "available": "0",
+          "filesystem": "/dev/loop0",
+          "inode_available": "0",
+          "inode_total": "11908",
+          "inode_used": "11908",
+          "inode_used_pct": "100%",
+          "mount_point": "/snap/core20/2769",
+          "size": "64M",
+          "used": "64M",
+          "used_pct": "100%"
+        },
+        {
+          "available": "0",
+          "filesystem": "/dev/loop2",
+          "inode_available": "0",
+          "inode_total": "815",
+          "inode_used": "815",
+          "inode_used_pct": "100%",
+          "mount_point": "/snap/lxd/38688",
+          "size": "92M",
+          "used": "92M",
+          "used_pct": "100%"
+        },
+        {
+          "available": "0",
+          "filesystem": "/dev/loop3",
+          "inode_available": "0",
+          "inode_total": "610",
+          "inode_used": "610",
+          "inode_used_pct": "100%",
+          "mount_point": "/snap/snapd/26865",
+          "size": "50M",
+          "used": "50M",
+          "used_pct": "100%"
+        },
+        {
+          "available": "795M",
+          "filesystem": "tmpfs",
+          "inode_available": "1016864",
+          "inode_total": "1016886",
+          "inode_used": "22",
+          "inode_used_pct": "1%",
+          "mount_point": "/run/user/1000",
+          "size": "795M",
+          "used": "0",
+          "used_pct": "0%"
+        }
+      ],
+      "matched": true,
+      "raw": "__DFH__\nFilesystem                         Size  Used Avail Use% Mounted on\nudev                               3.9G     0  3.9G   0% /dev\ntmpfs                              795M  1.3M  794M   1% /run\n/dev/mapper/ubuntu--vg-ubuntu--lv   98G   91G  2.3G  98% /\ntmpfs                              3.9G     0  3.9G   0% /dev/shm\ntmpfs                              5.0M     0  5.0M   0% /run/lock\ntmpfs                              3.9G     0  3.9G   0% /sys/fs/cgroup\n/dev/sda2                          1.5G  221M  1.2G  16% /boot\n/dev/loop4                          64M   64M     0 100% /snap/core20/2717\n/dev/loop7                          92M   92M     0 100% /snap/lxd/38333\n/dev/loop1                          49M   49M     0 100% /snap/snapd/26382\n/dev/loop0                          64M   64M     0 100% /snap/core20/2769\n/dev/loop2                          92M   92M     0 100% /snap/lxd/38688\n/dev/loop3                          50M   50M     0 100% /snap/snapd/26865\ntmpfs                              795M     0  795M   0% /run/user/1000\n\n__DFI__\nFilesystem                         Inodes  IUsed   IFree IUse% Mounted on\nudev                              1004565    479 1004086    1% /dev\ntmpfs                             1016886    787 1016099    1% /run\n/dev/mapper/ubuntu--vg-ubuntu--lv 6553600 530630 6022970    9% /\ntmpfs                             1016886      1 1016885    1% /dev/shm\ntmpfs                             1016886      3 1016883    1% /run/lock\ntmpfs                             1016886     18 1016868    1% /sys/fs/cgroup\n/dev/sda2                           98304    316   97988    1% /boot\n/dev/loop4                          11908  11908       0  100% /snap/core20/2717\n/dev/loop7                            815    815       0  100% /snap/lxd/38333\n/dev/loop1                            617    617       0  100% /snap/snapd/26382\n/dev/loop0                          11908  11908       0  100% /snap/core20/2769\n/dev/loop2                            815    815       0  100% /snap/lxd/38688\n/dev/loop3                            610    610       0  100% /snap/snapd/26865\ntmpfs                             1016886     22 1016864    1% /run/user/1000"
+    },
+    "updated_at": "2026-04-25T22:10:05"
+  },
+  "nginx_access": {
+    "parsed": {
+      "ident": "-",
+      "ip": "103.190.41.42",
+      "matched": true,
+      "method": "GET",
+      "path": "/profile/contact",
+      "protocol": "HTTP/1.1",
+      "raw": "103.190.41.42 - - [25/Apr/2026:16:24:46 +0000] \"GET /profile/contact HTTP/1.1\" 200 4596 \"https://studentportal.tufohss.edu.np/profile\" \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36\"",
+      "referrer": "https://studentportal.tufohss.edu.np/profile",
+      "request": "GET /profile/contact HTTP/1.1",
+      "size": "4596",
+      "status": "200",
+      "timestamp": "25/Apr/2026:16:24:46 +0000",
+      "user": "-",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+    },
+    "updated_at": "2026-04-25T22:09:47"
+  },
+  "service_health": {
+    "parsed": {
+      "failed_count": 1,
+      "failed_services": [
+        "fwupd-refresh.service"
+      ],
+      "matched": true,
+      "raw": "accounts-daemon.service     loaded active running Accounts Service                                            \natd.service                 loaded active running Deferred execution scheduler                                \ncron.service                loaded active running Regular background program processing daemon                \ndbus.service                loaded active running D-Bus System Message Bus                                    \nfwupd-refresh.service       loaded failed failed  Refresh fwupd metadata and update motd                      \ngetty@tty1.service          loaded active running Getty on tty1                                               \nirqbalance.service          loaded active running irqbalance daemon                                           \nmultipathd.service          loaded active running Device-Mapper Multipath Device Controller                   \nmysql.service               loaded active running MySQL Community Server                                      \nnetworkd-dispatcher.service loaded active running Dispatcher daemon for systemd-networkd                      \nnginx.service               loaded active running A high performance web server and a reverse proxy server    \nopen-vm-tools.service       loaded active running Service for virtual machines hosted on VMware               \nphp7.4-fpm.service          loaded active running The PHP 7.4 FastCGI Process Manager                         \npolkit.service              loaded active running Authorization Manager                                       \nrsyslog.service             loaded active running System Logging Service                                      \nsnapd.service               loaded active running Snap Daemon                                                 \nssh.service                 loaded active running OpenBSD Secure Shell server                                 \nsystemd-journald.service    loaded active running Journal Service                                             \nsystemd-logind.service      loaded active running Login Service                                               \nsystemd-networkd.service    loaded active running Network Service                                             \nsystemd-resolved.service    loaded active running Network Name Resolution                                     \nsystemd-timesyncd.service   loaded active running Network Time Synchronization                                \nsystemd-udevd.service       loaded active running udev Kernel Device Manager                                  \nudisks2.service             loaded active running Disk Manager                                                \nunattended-upgrades.service loaded active running Unattended Upgrades Shutdown                                \nuser@1000.service           loaded active running User Manager for UID 1000                                   \nvgauth.service              loaded active running Authentication service for virtual machines hosted on VMware",
+      "services": [
+        {
+          "load": "loaded",
+          "service_name": "accounts-daemon.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "atd.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "cron.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "dbus.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "fwupd-refresh.service",
+          "state": "failed",
+          "substate": "failed"
+        },
+        {
+          "load": "loaded",
+          "service_name": "getty@tty1.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "irqbalance.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "multipathd.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "mysql.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "networkd-dispatcher.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "nginx.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "open-vm-tools.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "php7.4-fpm.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "polkit.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "rsyslog.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "snapd.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "ssh.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "systemd-journald.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "systemd-logind.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "systemd-networkd.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "systemd-resolved.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "systemd-timesyncd.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "systemd-udevd.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "udisks2.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "unattended-upgrades.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "user@1000.service",
+          "state": "active",
+          "substate": "running"
+        },
+        {
+          "load": "loaded",
+          "service_name": "vgauth.service",
+          "state": "active",
+          "substate": "running"
+        }
+      ]
+    },
+    "updated_at": "2026-04-25T22:10:05"
+  }
+}

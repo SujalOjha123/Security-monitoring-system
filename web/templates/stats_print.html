@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unique IP Statistics Export</title>
+    <style>
+        body {
+            margin: 24px;
+            color: #111;
+            font-family: Arial, sans-serif;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 24px;
+        }
+
+        p {
+            margin: 0 0 16px;
+            color: #444;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        th,
+        td {
+            padding: 8px;
+            text-align: left;
+            border: 1px solid #cfcfcf;
+            vertical-align: top;
+            word-break: break-word;
+        }
+
+        th {
+            background: #efefef;
+        }
+
+        @media print {
+            body {
+                margin: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Unique IP Statistics</h1>
+    <p>Source file: {{ current_stats_file }}</p>
+    <table>
+        <thead>
+            <tr>
+                <th>IP</th>
+                <th>Country</th>
+                <th>City</th>
+                <th>First Seen</th>
+                <th>Last Seen</th>
+                <th>Hits</th>
+                <th>Timestamps</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for record in stats_rows %}
+            <tr>
+                <td>{{ record.ip }}</td>
+                <td>{{ record.country or "-" }}</td>
+                <td>{{ record.city or "-" }}</td>
+                <td>{{ record.first_seen or "-" }}</td>
+                <td>{{ record.last_seen or "-" }}</td>
+                <td>{{ record.hit_count or 0 }}</td>
+                <td>{{ (record.timestamps or []) | join(", ") }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <script>
+        window.addEventListener("load", function() {
+            window.print();
+        });
+    </script>
+</body>
+</html>

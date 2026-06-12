@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}History{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <h1 class="title">History Browser</h1>
+        <p class="subtitle">Browse locally captured logs by source and date. No remote history reads are performed.</p>
+    </div>
+</section>
+
+<section class="toolbar" style="margin-bottom:14px;">
+    <div class="controls">
+        <input class="search-input" id="historySearch" type="text" placeholder="Search entries…" style="width:240px;">
+    </div>
+    <div id="historyMeta" style="font-size:0.84rem;color:var(--muted);">
+        Showing <strong id="historyShownCount">{{ history_entries | length }}</strong> of
+        <strong id="historyTotalCount">{{ history_entries | length }}</strong> entries
+    </div>
+</section>
+
+<section class="history-grid">
+    <aside class="history-sidebar panel" id="historySidebar">
+        <h3>Sources</h3>
+        <div class="history-links" id="sourcesList">
+            {% for source_id in history_sources %}
+            <a href="#"
+               class="history-source-link {% if source_id == selected_source %}active{% endif %}"
+               data-source="{{ source_id }}">
+                {{ source_map[source_id].display_name if source_map[source_id] else source_id }}
+            </a>
+            {% endfor %}
+        </div>
+
+        <h3 id="datesHeader" style="margin-top:16px;">Dates</h3>
+        <div class="history-links" id="datesList">
+            {% for date in available_dates %}
+            <a href="#"
+               class="history-date-link {% if date == selected_date %}active{% endif %}"
+               data-date="{{ date }}">
+                {{ date }}
+            </a>
+            {% endfor %}
+        </div>
+    </aside>
+
+    <section class="history-events panel" id="historyEvents">
+        {% for entry in history_entries %}
+        <article class="history-event">
+            <strong>{{ entry.collected_at }}</strong>
+            <div>{{ entry.parsed.message or entry.parsed.path or entry.raw }}</div>
+        </article>
+        {% endfor %}
+        {% if not history_entries %}
+        <article class="history-event">No local history for this source/date yet.</article>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    var SOURCE_MAP = {{ source_map | tojson }};
+    var currentSource = {{ selected_source | tojson }};
+    var currentDate   = {{ selected_date | tojson }};
+    var searchQuery   = "";
+    var allEntries    = [];
+
+    var sourcesList  = document.getElementById("sourcesList");
+    var datesList    = document.getElementById("datesList");
+    var historyEvents = document.getElementById("historyEvents");
+    var shownCount   = document.getElementById("historyShownCount");
+    var totalCount   = document.getElementById("historyTotalCount");
+    var searchInput  = document.getElementById("historySearch");
+
+    function setActive(container, cls, value) {
+        Array.from(container.querySelectorAll("." + cls)).forEach(function(a) {
+            a.classList.toggle("active", a.dataset[cls === "history-source-link" ? "source" : "date"] === value);
+        });
+    }
+
+    function renderEntries(entries) {
+        while (historyEvents.firstChild) { historyEvents.removeChild(historyEvents.firstChild); }
+
+        var q = searchQuery.toLowerCase();
+        var filtered = q ? entries.filter(function(e) {
+            var text = (e.parsed && (e.parsed.message || e.parsed.path)) || e.raw || "";
+            return text.toLowerCase().includes(q);
+        }) : entries;
+
+        totalCount.textContent = String(entries.length);
+        shownCount.textContent = String(filtered.length);
+
+        if (filtered.length === 0) {
+            var art = document.createElement("article");
+            art.className = "history-event";
+            art.textContent = q ? "No entries match your search." : "No local history for this source/date yet.";
+            historyEvents.appendChild(art);
+            return;
+        }
+
+        filtered.forEach(function(entry) {
+            var art = document.createElement("article");
+            art.className = "history-event";
+
+            var strong = document.createElement("strong");
+            strong.textContent = entry.collected_at || "";
+
+            var div = document.createElement("div");
+            var parsed = entry.parsed || {};
+            div.textContent = parsed.message || parsed.path || entry.raw || "";
+
+            art.appendChild(strong);
+            art.appendChild(div);
+            historyEvents.appendChild(art);
+        });
+    }
+
+    function loadSource(sourceId) {
+        currentSource = sourceId;
+        fetch("/api/history?source_id=" + encodeURIComponent(sourceId))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                /* Rebuild dates list */
+                while (datesList.firstChild) { datesList.removeChild(datesList.firstChild); }
+                data.available_dates.forEach(function(date) {
+                    var a = document.createElement("a");
+                    a.href = "#";
+                    a.className = "history-date-link" + (date === data.selected_date ? " active" : "");
+                    a.dataset.date = date;
+                    a.textContent = date;
+                    a.addEventListener("click", function(e) { e.preventDefault(); loadDate(date); });
+                    datesList.appendChild(a);
+                });
+                setActive(sourcesList, "history-source-link", sourceId);
+
+                /* Load first date */
+                if (data.selected_date) { loadDate(data.selected_date, data.entries); }
+                else { allEntries = []; renderEntries([]); }
+            })
+            .catch(function() {
+                allEntries = [];
+                renderEntries([]);
+            });
+    }
+
+    function loadDate(date, preloadedEntries) {
+        currentDate = date;
+        setActive(datesList, "history-date-link", date);
+
+        if (preloadedEntries) {
+            allEntries = preloadedEntries;
+            renderEntries(allEntries);
+            return;
+        }
+
+        fetch("/api/history?source_id=" + encodeURIComponent(currentSource) + "&date=" + encodeURIComponent(date))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                allEntries = data.entries || [];
+                renderEntries(allEntries);
+            })
+            .catch(function() {
+                allEntries = [];
+                renderEntries([]);
+            });
+    }
+
+    /* Delegated click handlers */
+    sourcesList.addEventListener("click", function(e) {
+        var link = e.target.closest(".history-source-link");
+        if (!link) { return; }
+        e.preventDefault();
+        loadSource(link.dataset.source);
+    });
+
+    datesList.addEventListener("click", function(e) {
+        var link = e.target.closest(".history-date-link");
+        if (!link) { return; }
+        e.preventDefault();
+        loadDate(link.dataset.date);
+    });
+
+    searchInput.addEventListener("input", function() {
+        searchQuery = this.value;
+        renderEntries(allEntries);
+    });
+
+    /* Seed from server-rendered initial data */
+    var serverEntries = document.querySelectorAll(".history-event");
+    allEntries = Array.from(serverEntries).map(function(el) {
+        return {
+            collected_at: el.querySelector("strong") ? el.querySelector("strong").textContent : "",
+            parsed: {},
+            raw: el.querySelector("div") ? el.querySelector("div").textContent : el.textContent
+        };
+    });
+}());
+</script>
+{% endblock %}

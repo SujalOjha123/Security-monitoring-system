@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Auth{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div>
+        <h1 class="title">Authentication Activity</h1>
+        <p class="subtitle">Recent auth log events and brute-force style alerts derived from read-only host logs.</p>
+    </div>
+</section>
+
+<section class="toolbar">
+    <div class="metrics">
+        <div class="metric">Auth Events: <strong id="authEventCount">{{ auth_entries | length }}</strong></div>
+        <div class="metric">Brute-force Alerts: <strong id="authAlertCount" style="color:{% if auth_alerts %}var(--danger){% else %}var(--success){% endif %};">{{ auth_alerts | length }}</strong></div>
+        <div class="metric">Last update: <strong id="authLastUpdate">—</strong></div>
+    </div>
+    <div class="controls">
+        <input class="search-input" id="authSearch" type="text" placeholder="Search IP, user, message…">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="filter-button active" data-filter="all" id="btnAll">All</button>
+            <button type="button" class="filter-button" data-filter="failed" id="btnFailed">Failed</button>
+            <button type="button" class="filter-button" data-filter="accepted" id="btnAccepted">Accepted</button>
+            <button type="button" class="filter-button" data-filter="invalid_user" id="btnInvalid">Invalid User</button>
+        </div>
+    </div>
+</section>
+
+{% if auth_alerts %}
+<div style="margin-bottom:14px;padding:12px 16px;border:1px solid rgba(255,107,122,0.28);border-radius:var(--radius-sm);background:rgba(255,107,122,0.07);">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <span class="badge badge-danger">Brute Force</span>
+        <span style="color:var(--danger);font-size:0.88rem;font-weight:500;">{{ auth_alerts | length }} brute-force alert{{ 's' if auth_alerts | length != 1 else '' }} detected</span>
+    </div>
+    {% for alert in auth_alerts[:3] %}
+    <div style="font-size:0.82rem;color:var(--muted);margin-bottom:4px;">
+        — {{ alert.title }} {% if alert.ip %}from {{ alert.ip }}{% endif %}
+        {% if alert.country %}({{ alert.country }}){% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<section class="table-shell panel">
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Action</th>
+                <th>Result</th>
+                <th>User</th>
+                <th>IP</th>
+                <th>Message</th>
+            </tr>
+        </thead>
+        <tbody id="authBody">
+            {% for entry in auth_entries %}
+            <tr class="auth-row"
+                data-result="{{ entry.parsed.result or '' }}"
+                data-text="{{ (entry.parsed.ip or '') ~ ' ' ~ (entry.parsed.username or '') ~ ' ' ~ (entry.parsed.message or entry.raw) }}">
+                <td style="white-space:nowrap;font-size:0.80rem;color:var(--muted);">{{ entry.parsed.timestamp or entry.collected_at }}</td>
+                <td>{{ entry.parsed.action or "—" }}</td>
+                <td>
+                    {% set result = entry.parsed.result or '' %}
+                    {% if result == 'failed' or result == 'invalid_user' %}
+                        <span class="badge badge-danger">{{ result }}</span>
+                    {% elif result == 'accepted' %}
+                        <span class="badge badge-success">{{ result }}</span>
+                    {% else %}
+                        <span class="text-muted">{{ result or "—" }}</span>
+                    {% endif %}
+                </td>
+                <td style="font-family:'Consolas','Cascadia Code',monospace;font-size:0.82rem;">{{ entry.parsed.username or "—" }}</td>
+                <td style="font-family:'Consolas','Cascadia Code',monospace;font-size:0.82rem;">{{ entry.parsed.ip or "—" }}</td>
+                <td style="max-width:360px;word-break:break-word;font-size:0.82rem;">{{ entry.parsed.message or entry.raw }}</td>
+            </tr>
+            {% endfor %}
+            {% if not auth_entries %}
+            <tr><td colspan="6" class="empty">No auth events yet.</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    "use strict";
+
+    var activeFilter = "all";
+    var searchQuery  = "";
+    var allRows = Array.from(document.querySelectorAll(".auth-row"));
+
+    function applyFilters() {
+        allRows.forEach(function(row) {
+            var matchFilter = activeFilter === "all" || row.dataset.result === activeFilter;
+            var matchSearch = !searchQuery || row.dataset.text.toLowerCase().includes(searchQuery);
+            row.style.display = (matchFilter && matchSearch) ? "" : "none";
+        });
+    }
+
+    /* Filter buttons */
+    document.querySelectorAll(".filter-button[data-filter]").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            document.querySelectorAll(".filter-button[data-filter]").forEach(function(b){ b.classList.remove("active"); });
+            btn.classList.add("active");
+            activeFilter = btn.dataset.filter;
+            applyFilters();
+        });
+    });
+
+    /* Search */
+    document.getElementById("authSearch").addEventListener("input", function() {
+        searchQuery = this.value.toLowerCase();
+        applyFilters();
+    });
+
+    /* Live refresh */
+    if (!window._globalSocket) { return; }
+
+    window._globalSocket.on("log", function(msg) {
+        if (msg.source_id !== "auth_log") { return; }
+        var parsed = msg.parsed || {};
+
+        document.getElementById("authLastUpdate").textContent = new Date(msg.received_at).toLocaleTimeString();
+
+        var result = parsed.result || "";
+        var resultClass = (result === "failed" || result === "invalid_user") ? "badge badge-danger" : result === "accepted" ? "badge badge-success" : "text-muted";
+        var resultContent = result || "—";
+
+        var tr = document.createElement("tr");
+        tr.className = "auth-row";
+        tr.dataset.result = result;
+        tr.dataset.text = (parsed.ip || "") + " " + (parsed.username || "") + " " + (parsed.message || msg.raw || "");
+
+        function addTd(text, opts) {
+            opts = opts || {};
+            var td = document.createElement("td");
+            if (opts.badge) {
+                var span = document.createElement("span");
+                span.className = opts.badge;
+                span.textContent = text;
+                td.appendChild(span);
+            } else if (opts.spanClass) {
+                var s = document.createElement("span");
+                s.className = opts.spanClass;
+                s.textContent = text;
+                td.appendChild(s);
+            } else {
+                td.textContent = text;
+            }
+            if (opts.style) { td.setAttribute("style", opts.style); }
+            return td;
+        }
+
+        tr.appendChild(addTd(parsed.timestamp || msg.collected_at || "—", { style: "white-space:nowrap;font-size:0.80rem;color:var(--muted);" }));
+        tr.appendChild(addTd(parsed.action || "—"));
+        if (result === "failed" || result === "invalid_user") {
+            tr.appendChild(addTd(result, { badge: "badge badge-danger" }));
+        } else if (result === "accepted") {
+            tr.appendChild(addTd(result, { badge: "badge badge-success" }));
+        } else {
+            tr.appendChild(addTd(result || "—", { spanClass: "text-muted" }));
+        }
+        tr.appendChild(addTd(parsed.username || "—", { style: "font-family:'Consolas','Cascadia Code',monospace;font-size:0.82rem;" }));
+        tr.appendChild(addTd(parsed.ip || "—", { style: "font-family:'Consolas','Cascadia Code',monospace;font-size:0.82rem;" }));
+        tr.appendChild(addTd(parsed.message || msg.raw || "—", { style: "max-width:360px;word-break:break-word;font-size:0.82rem;" }));
+
+        var tbody = document.getElementById("authBody");
+        tbody.insertBefore(tr, tbody.firstChild);
+        allRows.unshift(tr);
+
+        /* Trim to 200 rows */
+        while (allRows.length > 200) {
+            var old = allRows.pop();
+            if (old.parentNode) { old.parentNode.removeChild(old); }
+        }
+
+        document.getElementById("authEventCount").textContent = String(allRows.length);
+        applyFilters();
+    });
+}());
+</script>
+{% endblock %}
