@@ -209,7 +209,7 @@ Collected data is stored in the `results/live_logs/` directory.
 - `results/live_logs/<source_id>/YYYY-MM-DD.jsonl`
 
 
-##License##
+**## License ##**
 Copyright (c) 2026 Sujal Ojha  
 
 All rights reserved.
