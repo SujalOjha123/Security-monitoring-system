@@ -208,3 +208,10 @@ Collected data is stored in the `results/live_logs/` directory.
 - `results/live_logs/geo_cache.json`
 - `results/live_logs/<source_id>/YYYY-MM-DD.jsonl`
 
+
+##License##
+Copyright (c) 2026 Sujal Ojha  
+
+All rights reserved.
+
+This source code is provided for viewing purposes only. No permission is granted to use, copy, modify, merge, publish, distribute, sublicense, or sell any part of this software without prior written permission from the copyright holder.
